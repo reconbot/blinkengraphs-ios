@@ -20,3 +20,5 @@ Skills (`mattpocock-skills`): `domain-modeling` when a term or decision changes,
 Comments carry only what code can't: the why, the platform gotcha, the source URL. Prose earns each sentence.
 
 Commits follow Conventional Commits. Commits, PRs and comments stay free of session links and personal or employer details; the repo is public.
+
+Never push to `main` once the repo has a release; land changes through a PR.
