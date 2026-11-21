@@ -12,7 +12,7 @@ A network diagnosis tool for iPhone and iPad: live latency, DNS, path state and 
   - `NWPathMonitor` path state
   - a hop trace
   - the network half of the Verdict
-- Measures only while the app is open. No widget.
+- Measures only while the app is open: no widget, no Live Activity ([ADR 0004](docs/adr/0004-foreground-only.md)).
 - No system-wide CPU or memory Meters: iOS doesn't expose them to apps.
 
 ## Spec
