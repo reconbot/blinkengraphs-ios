@@ -6,6 +6,7 @@ The first builds install from Xcode with free provisioning (a Personal Team). Si
 
 Consequences:
 
-- **No widget yet.** The README's widget shows the last Verdict, which the app must hand over through an App Group. Whether free provisioning allows App Groups is unconfirmed ([supported capabilities](https://developer.apple.com/help/account/reference/supported-capabilities-ios)), so the widget and the App Group arrive together with the paid team.
+- **The widget ships now.** It shows the last Verdict, which the app hands over through an App Group (`APP_GROUP`, derived from `BUNDLE_ID_PREFIX`). Apple's [capability table](https://developer.apple.com/help/account/reference/supported-capabilities-ios) lists App Groups for free accounts; the first device build confirms it.
+- **Paid-only capabilities stay out:** Access Wi-Fi Information (the SSID) and Network Extensions.
 - Free-provisioning installs expire after 7 days and need reinstalling from Xcode.
-- The App Store move needs: a paid team, a real bundle ID, the App Group, signing secrets in CI, and a privacy manifest.
+- The App Store move needs: a paid team, a real bundle ID, signing secrets in CI (fastlane with an App Store Connect API key), and a privacy manifest.

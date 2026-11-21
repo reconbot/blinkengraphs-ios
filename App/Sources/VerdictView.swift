@@ -11,7 +11,7 @@ struct VerdictView: View {
             List {
                 Section("Verdict") {
                     ForEach(Array(findings.enumerated()), id: \.offset) { _, f in
-                        Label(f.headline, systemImage: icon(f.severity))
+                        Label(f.headline, systemImage: f.severity.symbol)
                             .foregroundStyle(tokens.severity(f.severity))
                     }
                 }
@@ -28,14 +28,6 @@ struct VerdictView: View {
                 }
             }
             .navigationTitle("blinkengraphs")
-        }
-    }
-
-    private func icon(_ s: Severity) -> String {
-        switch s {
-        case .crit: "xmark.octagon.fill"
-        case .warn: "exclamationmark.triangle.fill"
-        case .ok: "checkmark.circle.fill"
         }
     }
 }

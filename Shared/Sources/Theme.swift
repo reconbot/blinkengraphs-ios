@@ -15,3 +15,13 @@ extension Tokens {
         swiftUIColor("color.severity.\(s.rawValue.lowercased())")
     }
 }
+
+extension Severity {
+    var symbol: String {
+        switch self {
+        case .crit: "xmark.octagon.fill"
+        case .warn: "exclamationmark.triangle.fill"
+        case .ok: "checkmark.circle.fill"
+        }
+    }
+}

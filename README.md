@@ -51,5 +51,7 @@ swift test --package-path BlinkengraphsKit
 | `spec/` | The spec, pinned to a release tag as a git submodule |
 | `BlinkengraphsKit/` | `BlinkengraphsCore`: Probe stats, Hop Trace, Meters, Verdict. Foundation only |
 | `App/` | The SwiftUI app: probing and UI |
+| `Widget/` | WidgetKit extension showing the last Verdict |
+| `Shared/` | Code both targets compile: spec resources, theme, App Group access |
 | `project.yml` | XcodeGen project spec; the `.xcodeproj` is generated |
 | `docs/adr/` | Decisions |

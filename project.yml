@@ -20,6 +20,7 @@ targets:
     platform: iOS
     sources:
       - App/Sources
+      - Shared/Sources
       # Bundled from the pinned spec so defaults and colors match every platform.
       - path: spec/defaults.json
         buildPhase: resources
@@ -28,10 +29,16 @@ targets:
     dependencies:
       - package: BlinkengraphsKit
         product: BlinkengraphsCore
+      - target: BlinkengraphsWidget
+    entitlements:
+      path: App/Blinkengraphs.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP)]
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: blinkengraphs
+        AppGroup: $(APP_GROUP)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # Shown by the Local Network Privacy prompt before the first Gateway Probe.
@@ -39,6 +46,33 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).blinkengraphs
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+  BlinkengraphsWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widget/Sources
+      - Shared/Sources
+      - path: spec/tokens/blinkengraphs.tokens.json
+        buildPhase: resources
+    dependencies:
+      - package: BlinkengraphsKit
+        product: BlinkengraphsCore
+    entitlements:
+      path: Widget/BlinkengraphsWidget.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP)]
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: blinkengraphs
+        AppGroup: $(APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).blinkengraphs.widget
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
 schemes:
