@@ -7,7 +7,7 @@ jobs:
   probe:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Host tools
         continue-on-error: true
         run: |

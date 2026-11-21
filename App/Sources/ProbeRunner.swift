@@ -29,7 +29,7 @@ struct TCPProbeRunner: ProbeRunner {
         let once = Once()
 
         return await withCheckedContinuation { cont in
-            func finish(_ outcome: ProbeOutcome) {
+            @Sendable func finish(_ outcome: ProbeOutcome) {
                 guard once.claim() else { return }
                 conn.cancel()
                 cont.resume(returning: outcome)
