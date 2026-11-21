@@ -121,7 +121,9 @@ final class Monitor {
                     }
                 }
             }
-            return await group.reduce(into: []) { $0.append($1) }
+            var results: [HopResult] = []
+            for await r in group { results.append(r) }
+            return results
         }
         // Highest TTL first: past the Target every TTL is `reached`, and the lowest reached one,
         // recorded last, prunes the rows above it.
