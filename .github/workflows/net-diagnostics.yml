@@ -1,0 +1,24 @@
+name: Network diagnostics
+
+# Manual: which Probes can reach the internet from a hosted macOS runner?
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Host tools
+        continue-on-error: true
+        run: |
+          set -x
+          sw_vers; xcodebuild -version
+          route -n get default || true
+          ping -c 3 -t 5 1.1.1.1 || true
+          ping -c 3 -t 5 "$(route -n get default | awk '/gateway/{print $2}')" || true
+          traceroute -I -n -w 1 -q 1 -m 8 1.1.1.1 || true
+          nc -z -G 3 -w 3 1.1.1.1 443 && echo "tcp 443 ok" || true
+          dig +time=2 +tries=1 @1.1.1.1 cloudflare.com A || true
+          dig +time=2 +tries=1 cloudflare.com A || true
+      - name: Unprivileged sockets, the way the app will probe
+        run: swift .github/diagnostics/net-probe.swift

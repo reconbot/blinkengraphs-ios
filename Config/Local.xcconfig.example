@@ -1,0 +1,3 @@
+// Free provisioning: your Personal Team ID from Xcode > Settings > Accounts.
+DEVELOPMENT_TEAM = ABCDE12345
+BUNDLE_ID_PREFIX = com.yourname

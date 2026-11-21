@@ -1,0 +1,48 @@
+# XcodeGen spec; the .xcodeproj is generated, not committed. `xcodegen generate`
+name: Blinkengraphs
+options:
+  deploymentTarget:
+    iOS: "18.0"
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  BlinkengraphsKit:
+    path: BlinkengraphsKit
+targets:
+  Blinkengraphs:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+      # Bundled from the pinned spec so defaults and colors match every platform.
+      - path: spec/defaults.json
+        buildPhase: resources
+      - path: spec/tokens/blinkengraphs.tokens.json
+        buildPhase: resources
+    dependencies:
+      - package: BlinkengraphsKit
+        product: BlinkengraphsCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: blinkengraphs
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # Shown by the Local Network Privacy prompt before the first Gateway Probe.
+        NSLocalNetworkUsageDescription: blinkengraphs measures latency to your router to tell Wi-Fi problems from ISP problems.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).blinkengraphs
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  Blinkengraphs:
+    build:
+      targets:
+        Blinkengraphs: all
