@@ -1,7 +1,6 @@
 import BlinkengraphsCore
 import Foundation
 import Observation
-import WidgetKit
 
 /// Runs the Probe Group's Probes on the latency interval and keeps the Verdict current.
 @MainActor @Observable
@@ -57,9 +56,5 @@ final class Monitor {
         let window = Double(defaults.history.recentWindowS)
         stats = histories.mapValues { $0.stats(windowSeconds: window) }
         verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) }))
-        // WidgetKit budgets reloads, so ask for one only when the Findings change.
-        if AppGroup.snapshotStore?.save(VerdictSnapshot(at: .now, findings: verdict)) == true {
-            WidgetCenter.shared.reloadAllTimelines()
-        }
     }
 }

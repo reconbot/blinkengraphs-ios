@@ -12,7 +12,7 @@ A network diagnosis tool for iPhone and iPad: live latency, DNS, path state and 
   - `NWPathMonitor` path state
   - a hop trace
   - the network half of the Verdict
-- A widget that shows the last Verdict. iOS budgets widget refreshes, so it isn't a live graph.
+- Measures only while the app is open. No widget.
 - No system-wide CPU or memory Meters: iOS doesn't expose them to apps.
 
 ## Spec
@@ -51,7 +51,5 @@ swift test --package-path BlinkengraphsKit
 | `spec/` | The spec, pinned to a release tag as a git submodule |
 | `BlinkengraphsKit/` | `BlinkengraphsCore`: Probe stats, Hop Trace, Meters, Verdict. Foundation only |
 | `App/` | The SwiftUI app: probing and UI |
-| `Widget/` | WidgetKit extension showing the last Verdict |
-| `Shared/` | Code both targets compile: spec resources, theme, App Group access |
 | `project.yml` | XcodeGen project spec; the `.xcodeproj` is generated |
 | `docs/adr/` | Decisions |

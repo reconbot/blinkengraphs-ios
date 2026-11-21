@@ -1,7 +1,5 @@
 // Signing for sideloading: copy Local.xcconfig.example to Local.xcconfig (git-ignored)
 // and set your team and a bundle ID prefix you own.
 BUNDLE_ID_PREFIX = org.example
-// Shared by the app and the widget; derived so it follows your prefix.
-APP_GROUP = group.$(BUNDLE_ID_PREFIX).blinkengraphs
 CODE_SIGN_STYLE = Automatic
 #include? "Local.xcconfig"
