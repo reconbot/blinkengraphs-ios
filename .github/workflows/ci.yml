@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  vectors-linux:
+    name: Spec vectors (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.4.3-noble
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - run: swift test --package-path BlinkengraphsKit
+
+  ios:
+    name: Spec vectors and app build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - run: swift test --package-path BlinkengraphsKit
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build for the simulator, unsigned
+        run: >
+          xcodebuild build
+          -project Blinkengraphs.xcodeproj
+          -scheme Blinkengraphs
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
