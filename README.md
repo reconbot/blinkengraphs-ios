@@ -2,7 +2,7 @@
 
 A network diagnosis tool for iPhone and iPad: live latency, DNS, path state and a hop trace, with a plain-language Verdict on where the network is failing.
 
-**Status:** in development: the rules engine passes every spec vector; the app probes TCP only so far. The [Windows version](https://github.com/reconbot/blinkengraphs-win) ships today.
+**Status:** in development: the rules engine passes every spec vector; the app runs ICMP, TCP and DNS Probes, the Gateway Probe and a Hop Trace. The system DNS Probe is not built yet. The [Windows version](https://github.com/reconbot/blinkengraphs-win) ships today.
 
 ## Scope
 
