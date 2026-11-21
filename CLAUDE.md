@@ -21,4 +21,4 @@ Comments carry only what code can't: the why, the platform gotcha, the source UR
 
 Commits follow Conventional Commits. Commits, PRs and comments stay free of session links and personal or employer details; the repo is public.
 
-Never push to `main` once the repo has a release; land changes through a PR.
+Never force-push `main` once the repo has a release.
