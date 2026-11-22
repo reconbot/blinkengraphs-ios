@@ -84,7 +84,7 @@ The user opens the app because something is wrong, and asks three things in orde
 
 This departs from the spec's "one line per Link by default" (spec ADR 0002, iOS ADR 0014): six Targets times three Links is 18 lines in 190 pt, and the two questions need different cuts of the same data.
 
-The mock (generated data, five scenarios) also shows the spec's Paused rule erasing iOS history: a 10-minute session is 83% of an hour, so 7d and All draw almost nothing but Paused. Candidate departure: draw any bucket with measured time, and shade its Paused share.
+The mock (generated data, five scenarios) also shows the spec's Paused rule erasing iOS history: a 10-minute session is 83% of an hour, so 7d and All draw almost nothing but Paused. The owner kept the spec's rule.
 
 ## Pull requests
 
@@ -112,4 +112,4 @@ Done on a device, results into `docs/research/`:
 
 ## Open questions for the owner
 
-1. After trying the mock: does the Networks strip with one-network chart and Compare work, and should iOS draw any measured bucket instead of the spec's half-Paused rule?
+None open. The Networks strip, one-Link chart and Compare are accepted; the spec's half-Paused rule stays.

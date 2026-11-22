@@ -6,7 +6,8 @@ Spec [ADR 0002](https://github.com/reconbot/blinkengraphs/blob/main/docs/adr/000
 
 | Departure | Spec rule replaced | Vectors skipped | State |
 |---|---|---|---|
-| The dashboard charts one Link at a time, with a Networks strip and Compare networks | `history.md` Graph ranges: one line per Link by default | none | proposed; mock reviewed |
-| A bucket with any measured time draws its data; only a wholly Paused bucket draws as Paused | `history.md` Graph ranges: Paused when Paused seconds exceed `w / 2` | to list when built | candidate; owner to decide |
+| The dashboard charts one Link at a time, with a Networks strip and Compare networks | `history.md` Graph ranges: one line per Link by default | none | accepted by the owner after the prototype; code lands with the graph PR |
 
-A departure moves to "accepted" when the owner agrees and its code lands. Details: `docs/plan-spec-5.md`.
+Considered and declined: drawing any bucket with measured time instead of the spec's half-Paused rule. The owner kept the spec's rule, so 7d and All show a short session as Paused.
+
+Details: `docs/plan-spec-5.md`.
