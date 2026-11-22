@@ -13,4 +13,6 @@ struct Dashboard: Sendable {
     var results: [Probe: [ProbeResult]] = [:]
     /// The graphs' right edge, in the results' clock (seconds since 1970).
     var now: Double = Date().timeIntervalSince1970
+    /// Rollups for the longer graphs; nil before any exist.
+    var history: RollupHistory?
 }

@@ -50,13 +50,23 @@ jobs:
             for demo in isp-loss wifi cellular vpn offline; do
               for anchor in top bottom; do
                 xcrun simctl terminate "$UDID" "$bid" 2>/dev/null || true
-                xcrun simctl launch "$UDID" "$bid" -demo "$demo" -anchor "$anchor"
+                xcrun simctl launch "$UDID" "$bid" -demo "$demo" -anchor "$anchor" -range 15m
                 sleep 4
                 xcrun simctl io "$UDID" screenshot "out/$demo-$look-$anchor.png"
                 # Half size: still sharp on a PR, a quarter of the bytes on the branch.
                 sips -Z 1311 "out/$demo-$look-$anchor.png" >/dev/null
               done
             done
+          done
+          # The longer graph ranges, from the demo week of Rollups.
+          for shot in "isp-loss dark 1h" "isp-loss dark 24h" "wifi light 7d"; do
+            set -- $shot
+            xcrun simctl ui "$UDID" appearance "$2"
+            xcrun simctl terminate "$UDID" "$bid" 2>/dev/null || true
+            xcrun simctl launch "$UDID" "$bid" -demo "$1" -anchor top -range "$3"
+            sleep 4
+            xcrun simctl io "$UDID" screenshot "out/range-$3-$1-$2.png"
+            sips -Z 1311 "out/range-$3-$1-$2.png" >/dev/null
           done
           sips -Z 256 App/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out out/app-icon.png >/dev/null
       - name: Index
@@ -70,7 +80,11 @@ jobs:
           for name, caption in scenarios:
               cells = "".join(f'<td><img src="{name}-{look}-{anchor}.png" width="180"></td>' for look, anchor in shots)
               out.append(f"<tr><th>{caption}</th>{cells}</tr>")
-          out += ["</table>", "", '<img src="app-icon.png" width="96" alt="App icon">']
+          out += ["</table>", "", "<table><tr>"]
+          for name, caption in [("range-1h-isp-loss-dark", "1h, ISP loss"), ("range-24h-isp-loss-dark", "24h, ISP loss"),
+                                ("range-7d-wifi-light", "7d, Wi-Fi")]:
+              out.append(f'<td align="center"><img src="{name}.png" width="180"><br><sub>{caption}</sub></td>')
+          out += ["</tr></table>", "", '<img src="app-icon.png" width="96" alt="App icon">']
           print("\n".join(out))
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

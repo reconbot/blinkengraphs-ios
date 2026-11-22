@@ -10,6 +10,7 @@ enum Demo: String, CaseIterable {
         UserDefaults.standard.string(forKey: "demo").flatMap(Demo.init(rawValue:))
     }
 
+    @MainActor
     func dashboard(defaults: Defaults = SpecResources.defaults, now: Double = 1_800_000_000) -> Dashboard {
         var rng = SplitMix64(seed: UInt64(rawValue.hashValueStable))
         var d = Dashboard(path: path, now: now)
@@ -38,12 +39,37 @@ enum Demo: String, CaseIterable {
         d.findings = Verdict.evaluate(VerdictInput(probes: d.stats.map { .init(probe: $0.key, stat: $0.value) },
                                                    pathUp: d.path.satisfied, viaVPN: d.path.vpn))
         if self != .offline { (d.hops, d.hopNames) = hops }
+        d.history = rollups(defaults: defaults, now: now, link: d.path.link, rng: &rng)
         return d
     }
 
-    private struct Shape { var base: Double; var jitter: Double; var loss: Double; var spikeEvery = 0 }
+    /// A week of minutes: the phone was in use by day and the app closed overnight, so nights
+    /// are gaps. In the ISP scenario the trouble starts two hours ago.
+    @MainActor
+    private func rollups(defaults: Defaults, now: Double, link: Link, rng: inout SplitMix64) -> RollupHistory {
+        let history = RollupHistory(keepDays: defaults.history.rollupDays)
+        let nowMinute = Int(now / 60)
+        let first = nowMinute - defaults.history.rollupDays * 24 * 60 + 1
+        for probe in defaults.probeGroup.probes {
+            for minute in first...nowMinute {
+                let hour = (minute / 60) % 24
+                if (1...6).contains(hour) && nowMinute - minute > 120 { continue }
+                let troubled = self == .ispLoss && nowMinute - minute <= 120
+                guard let shape = (troubled || self != .ispLoss ? self : .wifi).shape(probe) else { continue }
+                var m = Minute()
+                for _ in 0..<4 {
+                    let lost = rng.unit() < shape.loss
+                    m.record(lost ? nil : shape.base + abs(rng.normal()) * shape.jitter * 0.6)
+                }
+                history.rollups.insert(StoredMinute(link: link, probe: probe, minute: minute, data: m))
+            }
+        }
+        return history
+    }
 
-    private func shape(_ p: Probe) -> Shape? {
+    fileprivate struct Shape { var base: Double; var jitter: Double; var loss: Double; var spikeEvery = 0 }
+
+    fileprivate func shape(_ p: Probe) -> Shape? {
         let v6 = p.isIPv6 == true
         let gw = p.target == Probe.gateway
         let factor = p.protocol.hasPrefix("tcp") ? 1.15 : p.protocol == "dns" ? 1.3 : 1
@@ -111,7 +137,7 @@ enum Demo: String, CaseIterable {
 }
 
 /// Deterministic, so every screenshot run draws the same lines.
-private struct SplitMix64 {
+struct SplitMix64 {
     var state: UInt64
     init(seed: UInt64) { state = seed }
     mutating func next() -> UInt64 {

@@ -5,7 +5,8 @@ import UIKit
 struct DashboardView: View {
     let dashboard: Dashboard
     @Environment(\.palette) private var palette
-    @State private var range: GraphRange = .fifteenMinutes
+    /// Remembered; also settable at launch (`-range 24h`) for screenshots.
+    @AppStorage("range") private var range: GraphRange = .fifteenMinutes
     @State private var showingSettings = false
 
     /// `Severity` sorts most severe first.

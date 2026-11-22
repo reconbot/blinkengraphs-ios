@@ -2,15 +2,30 @@ import BlinkengraphsCore
 import Charts
 import SwiftUI
 
-/// What the history graphs span. The RAM History holds 15 minutes (spec defaults.json, history).
+/// What the history graphs span, as the Windows Panel offers. Up to 15 minutes comes from the RAM
+/// History's raw samples, longer from Rollups (spec defaults.json `history`).
 enum GraphRange: String, CaseIterable, Identifiable {
-    case oneMinute = "1m", fiveMinutes = "5m", fifteenMinutes = "15m"
+    case oneMinute = "1m", fifteenMinutes = "15m", oneHour = "1h", oneDay = "24h", sevenDays = "7d"
     var id: Self { self }
     var seconds: Double {
         switch self {
         case .oneMinute: 60
-        case .fiveMinutes: 300
         case .fifteenMinutes: 900
+        case .oneHour: 3600
+        case .oneDay: 86_400
+        case .sevenDays: 604_800
+        }
+    }
+    /// Rollups hold whole minutes; with 60 buckets every longer range's buckets are whole minutes.
+    var usesRollups: Bool { seconds > 900 }
+    /// Gridlines, counted back from now.
+    var axisStep: Double {
+        switch self {
+        case .oneMinute: 20
+        case .fifteenMinutes: 300
+        case .oneHour: 900
+        case .oneDay: 21_600
+        case .sevenDays: 86_400
         }
     }
     var buckets: Int { 60 }
@@ -45,8 +60,19 @@ struct Series: Identifiable {
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
         return targets.enumerated().compactMap { i, target in
             let probe = Probe(target: target, protocol: "icmp")
-            guard let results = d.results[probe], !results.isEmpty else { return nil }
             let window = range.window(now: d.now)
+            if range.usesRollups {
+                guard let rollups = d.history?.rollups else { return nil }
+                let points = rollups.points(probe, on: d.path.link, from: window.lowerBound - range.bucketWidth,
+                                            to: window.upperBound, count: range.buckets + 1, aggregate: aggregate)
+                guard points.contains(where: { $0.count > 0 }) else { return nil }
+                let summary = rollups.summary(probe, on: d.path.link, from: d.now - range.seconds, to: d.now + 60,
+                                              aggregate: aggregate)
+                return Series(target: target, probe: probe, color: palette.series(i), points: points,
+                              now: d.now, range: range, summary: summary.value, aggregate: aggregate,
+                              loss: summary.loss)
+            }
+            guard let results = d.results[probe], !results.isEmpty else { return nil }
             let inRange = results.filter { $0.at > d.now - range.seconds }
             let replies = inRange.compactMap(\.rttMs)
             return Series(
@@ -154,11 +180,11 @@ private struct LatencyChart: View {
         .chartXScale(domain: -range.seconds...0)
         .chartYScale(domain: 0...yMax)
         .chartXAxis {
-            AxisMarks(values: Array(stride(from: -range.seconds, through: 0, by: range.seconds / 3))) { v in
+            AxisMarks(values: Array(stride(from: 0, through: -range.seconds, by: -range.axisStep))) { v in
                 AxisGridLine().foregroundStyle(palette.cardEdge)
                 AxisValueLabel {
                     if let s = v.as(Double.self) {
-                        Text(s == 0 ? "now" : "\(Int(s / 60))m").foregroundStyle(palette.textWeak)
+                        Text(axisLabel(s)).foregroundStyle(palette.textWeak)
                     }
                 }
             }
@@ -178,6 +204,15 @@ private struct LatencyChart: View {
         .animation(.smooth(duration: 0.5), value: yMax)
         // Linear over one refresh interval: the lines glide left continuously, as in gping.
         .animation(.linear(duration: refreshSeconds), value: now)
+    }
+
+    private func axisLabel(_ s: Double) -> String {
+        let a = -s
+        if a == 0 { return "now" }
+        if a < 120 { return "-\(Int(a))s" }
+        if a < 7200 { return "-\(Int(a / 60))m" }
+        if a < 172_800 { return "-\(Int(a / 3600))h" }
+        return "-\(Int(a / 86_400))d"
     }
 
     /// Room above the busiest line, ignoring its rarest spikes; a round number, so the scale
@@ -254,7 +289,7 @@ struct RangePicker: View {
                 Button(r.rawValue) { withAnimation(.smooth) { range = r } }
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(range == r ? palette.text : palette.textWeak)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .padding(.horizontal, 7).padding(.vertical, 4)
                     .background { if range == r { Capsule().fill(palette.cardEdge) } }
             }
         }

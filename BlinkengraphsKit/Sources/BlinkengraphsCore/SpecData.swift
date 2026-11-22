@@ -35,7 +35,10 @@ public struct Defaults: Decodable, Sendable {
     public struct History: Decodable, Sendable {
         public var ramMinutes: Int
         public var recentWindowS: Int
-        enum CodingKeys: String, CodingKey { case ramMinutes = "ram_minutes", recentWindowS = "recent_window_s" }
+        public var rollupDays: Int
+        enum CodingKeys: String, CodingKey {
+            case ramMinutes = "ram_minutes", recentWindowS = "recent_window_s", rollupDays = "rollup_days"
+        }
     }
 
     public struct HopTraceDefaults: Decodable, Sendable {
