@@ -58,28 +58,41 @@ App target:
 - **The clock can go backwards.** If the newest Raw `at` is later than launch, the kill Pause is empty, not negative.
 - **Only one writer.** `ArchiveWriter` runs on one actor; a Row is written exactly once even when launch catch-up and the running clock race.
 
-## Spec gaps found
+## Spec gaps, decided here
 
-Each needs a spec PR or an answer before the code that depends on it. Confidence that each is a real gap: high unless marked.
+The owner's call: decide each here, build to it, and raise it as a spec PR afterwards. Each decision is low-regret: it either matches a vector or adds a record the spec can drop.
 
-1. **VPN loses the Gateway in the Verdict.** The Verdict reads only the default-route Link. Under a VPN that is the tunnel, which has no Gateway; the Gateway Probe runs on the Wi-Fi Link underneath. Yet `verdict/vpn-isp-loss`, `vpn-icmp-filtered` and `vpn-ipv6-broken` all feed a `gateway/icmp` Probe with `via_vpn`. So either the VPN Link's Verdict borrows the Gateway Probe of the Link it rides on, or rules 1 and 2 never fire under a VPN. Whether today's app gets a Gateway from `NWPath.gateways` while a VPN is preferred is unconfirmed.
-2. **Route change inside a session.** Pause covers "not measuring". When Wi-Fi drops and cellular takes over, is there a settle before the new default-route Link is measured? A Pause is machine-wide, so it would also blank every other Link. ADR 0013's per-route settle has no spec home.
-3. **Offline then killed.** While the path is down no Probe is sent, so Raw gets nothing. If iOS then kills the app, the Offline stretch becomes part of the kill Pause. Fix candidates: Raw records path-down as a Link change, and "newest `at`" counts every record kind. Medium confidence that this matters to users.
-4. **First launch.** "Not yet started" is a Pause in `CONTEXT.md`, but with no Raw there is no `newest_at`, so no Pause and no `since_pause_s`. The Verdict then reads "All clear" with no Probes for the first seconds.
-5. **Archive key collisions.** Archives key a Link by interface and Gateway and keep A3 for a year. Home and office Wi-Fi at `192.168.1.1` on `en0` share one history. iOS can't tell them apart without the Access Wi-Fi Information entitlement (ADR 0003). ADR 0005 bounded this by 15 minutes of RAM; now it's permanent.
-6. **"Routes its Target"** can't be read on iOS: routing sockets are macOS-only. The candidates (a UDP `NWConnection`'s `currentPath`, or `getsockname` after `connect`) are unconfirmed. A VPN with `includeAllNetworks` or `enforceRoutes` also stops Wi-Fi-bound Probes from bypassing it, and the app can't see those flags.
-7. **Graph lines per Link.** Six Targets on three Links is 18 lines on a 190 pt chart. The spec says one line per Link by default; on a phone that may need a different default (one Link, with others on demand).
-8. **Cellular data cost.** The spec says 5–10 MB an hour. Counting packets for the default Probe Group gives about 20–55 MB an hour per Link, most of it Hop Trace sweeps. The opt-in text needs the real number, and cellular may need Hop Trace off or slower. Medium confidence: arithmetic, not a device reading.
-9. **iCloud Private Relay** relays all system DNS, so the `system-dns` Probe would measure the relay, and its utun may be read as a VPN Link. Unconfirmed on a device.
+| # | Gap | Decision |
+|---|---|---|
+| 1 | **VPN loses the Gateway.** The Verdict reads only the default-route Link: under a VPN, the tunnel, which has no Gateway. The `vpn-*` Verdict vectors still feed a `gateway/icmp` Probe. | A tunnel Link's Verdict input takes the Gateway Probes of the Link carrying the tunnel: the active non-tunnel Link that `NWPathMonitor` ranks first. Matches the vectors. |
+| 2 | **Network change mid-session.** Pause is machine-wide; nothing covers a new Link appearing. | Not a Pause. A Link that appears, or whose Gateway or IP versions change, waits the settle time before its first Round; other Links keep measuring. A Round on a Link that vanishes mid-Round records nothing. Raw records the Link change. ADR 0013's per-route settle survives, per Link. |
+| 3 | **Offline, then killed.** No Probes while Offline, so the kill Pause would swallow the Offline stretch. | Raw records path up and down as Link changes, and each flush that holds nothing else writes a "measuring" mark. The kill Pause begins one second after the newest record of any kind. |
+| 4 | **First launch** has no Pause, so "All clear" shows before any stats. | Launch with no Raw is a Pause from launch to launch plus settle. The Verdict reads "Resuming measurements" until stats arrive. |
+| 5 | **Archive key collisions.** Two Wi-Fi networks behind `192.168.1.1` share a year of Archives. | Accept it for now: keys stay interface and Gateway, as the spec says. Raise a spec PR for a network discriminator; the IPv6 /64 prefix is the candidate that needs no entitlement. Medium confidence that it is worth the extra key field. |
+| 6 | **"Routes its Target"** has no supported API on iOS. | Connect an unbound UDP socket to the Target and read `getsockname`: the source address names the interface the OS chose. Re-checked when the Target or the Links change. Fall back to `NWConnection.currentPath` if the device test disagrees. |
+| 7 | **Graph lines per Link** on a phone. | See "Graphs: what's happening", below. |
+| 8 | **Cellular data cost** reads 20–55 MB an hour against the spec's 5–10 MB. | Hop Trace runs on cellular too (owner). The opt-in shows the measured cost from the device test, and the app counts and shows the bytes it sent and received per Link. Raise the corrected number in the spec. |
+| 9 | **iCloud Private Relay** may route system DNS through the relay. | No decision until the device test. |
+
+## Graphs: what's happening
+
+The user opens the app because something is wrong, and asks three things in order: is it me, which network, and since when. The screen answers them top to bottom.
+
+1. **Verdict, naming its Link.** "Wi-Fi: Gateway OK, 1.1.1.1 losing 12%: ISP problem". It speaks for the default-route Link, as the spec says.
+2. **Links strip.** One row per active Link: name, state colour from its own Findings, Gateway and primary Target latency, loss, and bytes spent. The default-route Link is marked. This is where other Links show their state (spec: "in the Panel only"). Tapping a row picks it for the chart.
+3. **Latency chart, one Link at a time.** Default: the default-route Link, every Target, so Gateway against internet shows where the fault sits, as it does today. A "Compare Links" toggle switches to the primary Target on every Link, one colour per Link, which answers "is it the Wi-Fi or the carrier". Both modes draw Paused shading, loss marks, the provisional edge and Link-change markers, so every gap explains itself.
+
+This departs from the spec's "one line per Link by default". The reason: six Targets times three Links is 18 lines in 190 pt, and the two questions need different cuts of the same data. Raise it in the spec with the other gaps.
 
 ## Pull requests
 
 Each passes CI; feature PRs merge when tests pass.
 
 1. **`feat!: follow spec 5.0.0` (core).** Bump `spec` to v5.0.0. All core modules above, the tie-break fix, every vector passing. The app compiles against the new core with one Link and in-memory Raw. Removes the v3 History code. ADRs: supersede 0005, 0007, 0012, 0013; amend 0001's tie note.
-2. **`feat: Raw and Archives on disk; Pauses`.** `RawFile`, `ArchiveFiles`, `Lifecycle`. Migrate or drop the old `rollups/` (open question). ADRs: settle time (from the device test), Raw write cadence and format.
+2. **`feat: Raw and Archives on disk; Pauses`.** `RawFile`, `ArchiveFiles`, `Lifecycle`. Delete the old `rollups/` directory on first launch (owner: drop it). ADRs: settle time (from the device test), Raw write cadence and format.
 3. **`feat: measure every active Link`.** `LinkWatcher`, bound runners, cellular opt-in setting, per-Link Snapshot.
-4. **`feat: graphs per Link, Paused and provisional`.** The graph rebuild and Link picker.
+4. **`feat: graphs per Link, Paused and provisional`.** The Links strip, the chart rebuild with Compare Links, after the rendering prototype.
+5. **Spec PRs** for gaps 1–6 and 8 and the graph default, with vectors where a rule changes.
 
 PR 1 is large because the vectors change together; landing it first keeps every later PR green on the spec CI check.
 
@@ -97,7 +110,4 @@ Done on a device, results into `docs/research/`:
 
 ## Open questions for the owner
 
-1. Old `rollups/` (up to 7 days of Minutes): convert to A1 Rows (5 Minutes merge exactly into one), or drop?
-2. Spec gaps 1–5 and 8: spec PRs first, or decide here and raise them after?
-3. Graph default: every Link's lines, or the default-route Link with others on demand?
-4. Cellular opt-in: also measure Hop Trace on cellular, or Probes only?
+1. The Links strip and the Compare Links toggle above: right shape, or should the chart default to comparing Links?
