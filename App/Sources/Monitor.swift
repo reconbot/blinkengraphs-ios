@@ -109,7 +109,7 @@ final class Monitor {
     private func refreshVerdict() {
         stats = linkHistories.stats(on: path.link, windowSeconds: Double(defaults.history.recentWindowS))
         verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) },
-                                                pathUp: path.satisfied))
+                                                pathUp: path.satisfied, viaVPN: path.vpn))
     }
 
     private func apply(_ state: PathState) {

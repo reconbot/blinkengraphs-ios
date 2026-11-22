@@ -46,8 +46,13 @@ struct VerdictView: View {
                 }
                 ForEach(hops.keys.sorted(), id: \.self) { target in
                     Section("Hop Trace to \(target)") {
-                        ForEach(hops[target] ?? [], id: \.ttl) { row in
+                        let (rows, silent) = HopTrace.collapsingSilentTail(hops[target] ?? [])
+                        ForEach(rows, id: \.ttl) { row in
                             HopRowView(row: row, name: row.addr.flatMap { hopNames[$0] })
+                        }
+                        if let silent {
+                            Text("Hops \(silent.lowerBound)–\(silent.upperBound): no reply")
+                                .font(.callout).foregroundStyle(.secondary)
                         }
                     }
                 }
