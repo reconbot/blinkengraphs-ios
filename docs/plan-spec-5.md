@@ -10,7 +10,7 @@ Issue #31. Spec plan: [`docs/history-redesign.md`, iOS](https://github.com/recon
 | #35 | Core on spec 5.2.0: Raw, Archives, Pauses, stats from now (ADR 0015) | merged; released in 3.0.0 |
 | #37 | History on disk (ADR 0016) | merged |
 | #38 | Every active Link measured (ADR 0017) | merged |
-| #40 | Networks card, one-Link chart, Compare | open |
+| #40 | Networks card, one-Link chart, Compare | merged |
 
 Left for #31's "done when", each needing a device: the settle time, the Raw write cadence and its cost, and the binding tests (`docs/device-tests.md`). Also left: Hop Traces on Links besides the default route, and the graph-rendering prototype (the Canvas chart stays until it shows a reason to move).
 
