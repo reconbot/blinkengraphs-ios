@@ -22,7 +22,7 @@ final class Monitor {
                   publicAddress: snapshot.publicAddress)
     }
 
-    /// Minutes older than the RAM History, for the 1h, 24h and 7d graphs.
+    /// Minutes written to storage; the graphs read them up to the handover to RAM.
     @ObservationIgnored let history: RollupHistory
     @ObservationIgnored private var measurements: Measurements
     @ObservationIgnored private let files: RollupFiles
@@ -44,7 +44,7 @@ final class Monitor {
         measurements = Measurements(defaults: defaults)
         measurements.setProbeGroup(group)
         snapshot = measurements.snapshot()
-        history = RollupHistory(keepDays: defaults.history.rollupDays)
+        history = RollupHistory(keepDays: defaults.history.rollupDays, maxTimeoutMs: defaults.maxTimeoutMs)
         files = RollupFiles(keepDays: defaults.history.rollupDays)
         runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName),
                    SystemDNSProbeRunner(domain: defaults.dnsQueryName)]
@@ -63,7 +63,7 @@ final class Monitor {
         pathWatcher = watcher
 
         let group = self.group
-        repeating(every: .milliseconds(group.latencyMs)) { await $0.probeOnce() }
+        rounds(every: Double(group.latencyMs) / 1000)
         repeating(every: .seconds(60)) { await $0.checkCaptivePortal() }
         repeating(every: .seconds(defaults.publicAddress.refreshS)) { await $0.lookUpPublicAddress() }
         for target in group.targets where target.trace {
@@ -89,6 +89,23 @@ final class Monitor {
         tasks = []
         pathWatcher?.stop()
         pathWatcher = nil
+        // spec rules/history.md, "Minutes": shutting down writes every minute not yet written.
+        let rest = history.rollups.flush()
+        if !rest.isEmpty { Task { [files] in await files.append(rest) } }
+    }
+
+    /// Probe rounds on the spec's fixed grid (RoundClock), each result stamped with its round's `at`.
+    private func rounds(every interval: Double) {
+        tasks.append(Task { [weak self] in
+            var clock = RoundClock(start: Date().timeIntervalSince1970, interval: interval)
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.probeOnce(at: clock.at)
+                clock.finished(at: Date().timeIntervalSince1970)
+                let wait = clock.start - Date().timeIntervalSince1970
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            }
+        })
     }
 
     /// On a fixed beat: each round starts `interval` after the last one started, not after it
@@ -148,7 +165,7 @@ final class Monitor {
         }
     }
 
-    private func probeOnce() async {
+    private func probeOnce(at: Double) async {
         // spec rules/probe-stats.md: no network path, no Probes; the Verdict says Offline.
         guard path.satisfied else { return publish() }
         await refreshNames()
@@ -166,7 +183,7 @@ final class Monitor {
                 group.addTask { (probe, await runner.run(probe, address: addr, timeout: timeout)) }
             }
             for await (probe, outcome) in group {
-                if let result = measurements.record(probe, outcome, sentOn: link, at: Date().timeIntervalSince1970) {
+                if let result = measurements.record(probe, outcome, sentOn: link, at: at) {
                     closed += history.rollups.record(probe, result, on: link)
                 }
             }

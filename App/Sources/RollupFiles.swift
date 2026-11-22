@@ -65,7 +65,7 @@ actor RollupFiles {
 @MainActor
 final class RollupHistory {
     var rollups: Rollups
-    init(keepDays: Int) { rollups = Rollups(keepDays: keepDays) }
+    init(keepDays: Int, maxTimeoutMs: Int) { rollups = Rollups(keepDays: keepDays, maxTimeoutMs: maxTimeoutMs) }
 
     struct GraphKey: Hashable {
         var range: String, aggregate: Aggregate, link: Link, probe: Probe
