@@ -9,9 +9,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer push supersedes a PR's run. On main every commit's run finishes: a release's notes wait
+# for its commit's screenshots, and cancelling them left v1.0.0 without any.
 concurrency:
-  group: screenshots-${{ github.ref }}
-  cancel-in-progress: true
+  group: screenshots-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   render:
