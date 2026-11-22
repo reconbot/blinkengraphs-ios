@@ -64,6 +64,50 @@ enum Sockets {
         return .timeout
     }
 
+    enum ConnectOutcome: Sendable {
+        case connected(ms: Double)
+        case timeout
+        case failed(errno: Int32)
+    }
+
+    /// TCP handshake time to `ip:port`: non-blocking connect, then wait for writability.
+    /// BSD sockets, like the ICMP and DNS Probes, so IPv4 Targets go through iOS's 464XLAT
+    /// on IPv6-only cellular, where an NWConnection to an IPv4 literal never became ready.
+    static func tcpConnect(to ip: String, port: UInt16, timeout: Duration) -> ConnectOutcome {
+        let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard fd >= 0 else { return .failed(errno: errno) }
+        defer { close(fd) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+
+        var a = sockaddr_in()
+        a.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        a.sin_family = sa_family_t(AF_INET)
+        a.sin_port = port.bigEndian
+        guard inet_pton(AF_INET, ip, &a.sin_addr) == 1 else { return .failed(errno: EINVAL) }
+
+        let start = ContinuousClock.now
+        let r = withUnsafePointer(to: &a) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if r == 0 { return .connected(ms: (ContinuousClock.now - start).milliseconds) }
+        guard errno == EINPROGRESS else { return .failed(errno: errno) }
+
+        while true {
+            let remaining = (start + timeout) - ContinuousClock.now
+            guard remaining > .zero else { return .timeout }
+            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            let ready = poll(&pfd, 1, Int32(max(1, remaining.milliseconds.rounded(.up))))
+            if ready < 0 && errno == EINTR { continue }
+            guard ready > 0 else { return .timeout }
+            var err: Int32 = 0
+            var len = socklen_t(MemoryLayout<Int32>.size)
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
+            return err == 0 ? .connected(ms: (ContinuousClock.now - start).milliseconds) : .failed(errno: err)
+        }
+    }
+
     private static func send(_ fd: Int32, _ bytes: [UInt8], to ip: String, port: UInt16) -> Bool {
         var a = sockaddr_in()
         a.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)

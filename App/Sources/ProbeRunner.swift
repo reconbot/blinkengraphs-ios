@@ -1,7 +1,6 @@
 import BlinkengraphsCore
 import Darwin
 import Foundation
-import Network
 
 enum ProbeOutcome: Sendable {
     case reply(ms: Double)
@@ -56,51 +55,15 @@ struct DNSProbeRunner: ProbeRunner {
     }
 }
 
-/// TCP handshake time via Network.framework.
+/// TCP handshake time over a BSD socket.
 struct TCPProbeRunner: ProbeRunner {
     func handles(_ probe: Probe) -> Bool { probe.protocol.hasPrefix("tcp:") }
 
     func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome {
-        guard let port = NWEndpoint.Port(String(probe.protocol.dropFirst(4))) else { return .lost }
-        let params = NWParameters.tcp
-        params.preferNoProxies = true
-        let conn = NWConnection(host: NWEndpoint.Host(address), port: port, using: params)
-        let start = ContinuousClock.now
-        let once = Once()
-
-        return await withCheckedContinuation { cont in
-            @Sendable func finish(_ outcome: ProbeOutcome) {
-                guard once.claim() else { return }
-                conn.cancel()
-                cont.resume(returning: outcome)
-            }
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    finish(.reply(ms: (ContinuousClock.now - start).milliseconds))
-                case .waiting, .failed:
-                    finish(conn.currentPath?.unsatisfiedReason == .localNetworkDenied ? .denied : .lost)
-                default: break
-                }
-            }
-            conn.start(queue: .global(qos: .utility))
-            Task {
-                try? await Task.sleep(for: timeout)
-                finish(.lost)
-            }
-        }
-    }
-}
-
-/// Thread-safe one-shot latch for continuation callbacks that can race.
-private final class Once: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-
-    func claim() -> Bool {
-        lock.withLock {
-            defer { done = true }
-            return !done
+        guard let port = UInt16(probe.protocol.dropFirst(4)) else { return .lost }
+        switch await offPool({ Sockets.tcpConnect(to: address, port: port, timeout: timeout) }) {
+        case .connected(let ms): return .reply(ms: ms)
+        case .timeout, .failed: return .lost
         }
     }
 }
