@@ -14,6 +14,8 @@ struct BlinkengraphsApp: App {
     /// `-capture YES`: render every CI screenshot in this one launch (ScreenshotRun).
     @State private var shots = ScreenshotRun.requested ? ScreenshotRun() : nil
 
+    init() { Diagnostics.shared.start() }
+
     var body: some Scene {
         WindowGroup {
             if let shots {
