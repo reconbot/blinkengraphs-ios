@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.1.0](https://github.com/reconbot/blinkengraphs-ios/compare/v3.0.0...v3.1.0) (2026-11-22)
+
+
+### Features
+
+* a Networks card; the chart shows one network or compares them ([#40](https://github.com/reconbot/blinkengraphs-ios/issues/40)) ([4a8da9f](https://github.com/reconbot/blinkengraphs-ios/commit/4a8da9f90130a8dc100eaddd271c6463e90e01cd))
+* History survives a relaunch; a kill leaves a Pause from the last save ([#37](https://github.com/reconbot/blinkengraphs-ios/issues/37)) ([2affa15](https://github.com/reconbot/blinkengraphs-ios/commit/2affa1516aeadb45351f2e9a48f711f415656c01))
+* measure every active Link, each pinned to its interface ([#38](https://github.com/reconbot/blinkengraphs-ios/issues/38)) ([0f96625](https://github.com/reconbot/blinkengraphs-ios/commit/0f96625222e394ecb02e5c0c18e806d226bf0b49))
+
 ## [3.0.0](https://github.com/reconbot/blinkengraphs-ios/compare/v2.0.0...v3.0.0) (2026-11-22)
 
 
