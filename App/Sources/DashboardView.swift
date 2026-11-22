@@ -1,0 +1,302 @@
+import BlinkengraphsCore
+import SwiftUI
+import UIKit
+
+struct DashboardView: View {
+    let dashboard: Dashboard
+    @Environment(\.palette) private var palette
+    @State private var range: GraphRange = .fifteenMinutes
+    @State private var showingSettings = false
+
+    /// `Severity` sorts most severe first.
+    private var worst: Severity { dashboard.findings.map(\.severity).min() ?? .ok }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VerdictBanner(findings: dashboard.findings)
+                    ConnectionChips(path: dashboard.path)
+                    LatencyCard(dashboard: dashboard, range: $range)
+                    TargetGrid(dashboard: dashboard, range: range)
+                    ForEach(dashboard.hops.keys.sorted(by: Self.ipv4First), id: \.self) { target in
+                        HopTraceCard(target: target, rows: dashboard.hops[target] ?? [], names: dashboard.hopNames)
+                    }
+                    Footer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+            }
+            // `-anchor bottom` opens scrolled to the end, so screenshots can reach the Hop Traces.
+            .defaultScrollAnchor(UserDefaults.standard.string(forKey: "anchor") == "bottom" ? .bottom : .top)
+            .background(palette.background.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .principal) { Wordmark(severity: worst) }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    reportMenu
+                    Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                }
+            }
+            .toolbarBackground(palette.background, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showingSettings) { SettingsView() }
+        }
+        .tint(palette.color("color.section.network"))
+        .sensoryFeedback(trigger: worst) { old, new in new < old ? .warning : nil }
+    }
+
+    private static func ipv4First(_ a: String, _ b: String) -> Bool {
+        (a.contains(":") ? 1 : 0, a) < (b.contains(":") ? 1 : 0, b)
+    }
+
+    private var reportMenu: some View {
+        Menu {
+            Button("Copy report", systemImage: "doc.on.doc") { UIPasteboard.general.string = report(redact: false) }
+            Button("Copy redacted report", systemImage: "eye.slash") { UIPasteboard.general.string = report(redact: true) }
+            ShareLink(item: report(redact: false)) { Label("Share report", systemImage: "square.and.arrow.up") }
+        } label: {
+            Label("Report", systemImage: "doc.text.magnifyingglass")
+        }
+    }
+
+    /// A plain-text snapshot for pasting into a bug report; redacted hides public addresses and names.
+    private func report(redact: Bool) -> String {
+        let path = dashboard.path
+        let info = Bundle.main.infoDictionary
+        let app = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+        var connection: [(String, String)] = [
+            ("Path", path.satisfied ? "Up" : "Down"),
+            ("Via", path.satisfied ? [path.interfaces.first, path.radio].compactMap { $0 }.joined(separator: " · ") : "—"),
+            ("Supports", [path.ipv4 ? "IPv4" : nil, path.ipv6 ? "IPv6" : nil, path.dns ? "DNS" : nil]
+                .compactMap { $0 }.joined(separator: ", ")),
+            ("Gateway", path.gateway ?? "—"),
+        ]
+        if let q = path.linkQuality { connection.append(("Link quality", q)) }
+        if path.expensive { connection.append(("Expensive", "yes")) }
+        if path.constrained { connection.append(("Low Data Mode", "yes")) }
+        return Report.text(ReportInput(
+            generatedAt: .now,
+            header: ["app \(app)", "spec \(SpecResources.specVersion)",
+                     "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"],
+            verdict: dashboard.findings, connection: connection, probes: dashboard.stats, denied: dashboard.denied,
+            hops: dashboard.hops, names: dashboard.hopNames, targets: SpecResources.targetAddresses
+        ), redact: redact)
+    }
+}
+
+// MARK: - Header
+
+/// The name with a status LED that blinks while probes run.
+private struct Wordmark: View {
+    let severity: Severity
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(palette.severity(severity))
+                .frame(width: 9, height: 9)
+                .shadow(color: palette.severity(severity), radius: 4)
+                .phaseAnimator([1.0, 0.35]) { led, opacity in led.opacity(opacity) } animation: { _ in
+                    .easeInOut(duration: 0.9)
+                }
+            Text("blinkengraphs")
+                .font(.system(.headline, design: .rounded, weight: .bold))
+                .foregroundStyle(palette.text)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Verdict
+
+private struct VerdictBanner: View {
+    let findings: [Finding]
+    @Environment(\.palette) private var palette
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let lead = findings.min { $0.severity < $1.severity }
+        let rest = findings.filter { $0 != lead }
+        let tint = palette.severity(lead?.severity ?? .ok)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon(lead?.severity ?? .ok))
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .symbolEffect(.pulse, isActive: lead?.severity == .crit)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(lead.map { $0.domain == .clear ? "Verdict" : domainName($0.domain) } ?? "Verdict")
+                        .font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.8)
+                        .foregroundStyle(tint)
+                    Text(lead?.headline ?? "Measuring…")
+                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            ForEach(Array(rest.enumerated()), id: \.offset) { _, f in
+                Label(f.headline, systemImage: icon(f.severity))
+                    .font(.subheadline)
+                    .foregroundStyle(palette.severity(f.severity))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(LinearGradient(colors: [tint.opacity(0.22), tint.opacity(0.06)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(palette.card))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(tint.opacity(0.55), lineWidth: 1))
+        .shadow(color: tint.opacity(scheme == .dark ? 0.35 : 0.15), radius: 18, y: 4)
+        .animation(.smooth, value: lead)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func domainName(_ d: FaultDomain) -> String {
+        switch d {
+        case .localLoad: "This device"
+        case .lan: "Local network"
+        case .isp: "ISP"
+        case .dns: "DNS"
+        case .remote: "Remote"
+        case .icmpFiltering: "ICMP filtered"
+        case .selfSaturation: "Upload saturated"
+        case .offline: "Offline"
+        case .vpn: "VPN"
+        case .clear: "All clear"
+        }
+    }
+}
+
+func icon(_ s: Severity) -> String {
+    switch s {
+    case .crit: "xmark.octagon.fill"
+    case .warn: "exclamationmark.triangle.fill"
+    case .ok: "checkmark.seal.fill"
+    }
+}
+
+// MARK: - Connection
+
+private struct ConnectionChips: View {
+    let path: PathState
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if !path.satisfied {
+                    chip("No network path", "wifi.slash", tint: palette.severity(.crit))
+                } else {
+                    ForEach(path.interfaces, id: \.self) { chip(via($0), symbol($0)) }
+                    if path.ipv4 { chip("IPv4", "4.circle") }
+                    if path.ipv6 { chip("IPv6", "6.circle") }
+                    if let gw = path.gateway { chip(gw, "point.3.connected.trianglepath.dotted") }
+                    if let q = path.linkQuality { chip(q, "waveform.path.ecg") }
+                    if path.expensive { chip("Metered", "dollarsign.circle") }
+                    if path.constrained { chip("Low Data", "tortoise") }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollClipDisabled()
+    }
+
+    private func via(_ interface: String) -> String {
+        interface == "Cellular" ? ["Cellular", path.radio].compactMap { $0 }.joined(separator: " ") : interface
+    }
+
+    private func symbol(_ interface: String) -> String {
+        switch interface {
+        case "Wi-Fi": "wifi"
+        case "Cellular": "antenna.radiowaves.left.and.right"
+        case "Ethernet": "cable.connector"
+        case "VPN": "lock.shield"
+        default: "network"
+        }
+    }
+
+    private func chip(_ text: String, _ symbol: String, tint: Color? = nil) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.footnote.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(tint ?? palette.text)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Capsule().fill(palette.card))
+            .overlay(Capsule().strokeBorder(tint?.opacity(0.6) ?? palette.cardEdge, lineWidth: 1))
+    }
+}
+
+// MARK: - Shared card chrome
+
+/// A card with the Windows panel's accent tick beside its title.
+struct Card<Trailing: View, Content: View>: View {
+    let title: String
+    var accent: Color
+    @ViewBuilder var trailing: Trailing
+    @ViewBuilder var content: Content
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Capsule().fill(accent).frame(width: 3, height: 14)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                trailing
+            }
+            content
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(palette.card))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(palette.cardEdge, lineWidth: 1))
+    }
+}
+
+extension Card where Trailing == EmptyView {
+    init(title: String, accent: Color, @ViewBuilder content: () -> Content) {
+        self.init(title: title, accent: accent, trailing: { EmptyView() }, content: content)
+    }
+}
+
+private struct Footer: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        Text("app \(version) · spec \(SpecResources.specVersion)")
+            .font(.caption2).monospacedDigit()
+            .foregroundStyle(palette.textWeak)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 6)
+    }
+}
+
+/// Display name for a Target.
+func targetName(_ target: String) -> String {
+    switch target {
+    case Probe.gateway: "Gateway"
+    case Probe.systemDNS: "System DNS"
+    default: target
+    }
+}
+
+func ms(_ v: Double?) -> String {
+    guard let v else { return "—" }
+    return v < 10 ? String(format: "%.1f", v) : "\(Int(v.rounded()))"
+}
+
+func percent(_ loss: Double) -> String { "\(Int((loss * 100).rounded()))%" }
+
+#Preview("ISP loss") { DashboardView(dashboard: Demo.ispLoss.dashboard()) }
+#Preview("Wi-Fi") { DashboardView(dashboard: Demo.wifi.dashboard()) }
+#Preview("5G IPv6-only") { DashboardView(dashboard: Demo.cellular.dashboard()) }
+#Preview("VPN") { DashboardView(dashboard: Demo.vpn.dashboard()) }
+#Preview("Offline") { DashboardView(dashboard: Demo.offline.dashboard()) }

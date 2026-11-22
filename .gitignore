@@ -5,3 +5,5 @@ Config/Local.xcconfig
 .swiftpm/
 DerivedData/
 xcuserdata/
+# Rendered at build time from spec/brand/icon.svg (scripts/render-icon.swift)
+App/Assets.xcassets/AppIcon.appiconset/icon-1024.png

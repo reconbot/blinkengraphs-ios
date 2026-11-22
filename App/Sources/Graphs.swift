@@ -1,0 +1,409 @@
+import BlinkengraphsCore
+import Charts
+import SwiftUI
+
+/// What the history graphs span. The RAM History holds 15 minutes (spec defaults.json, history).
+enum GraphRange: String, CaseIterable, Identifiable {
+    case oneMinute = "1m", fiveMinutes = "5m", fifteenMinutes = "15m"
+    var id: Self { self }
+    var seconds: Double {
+        switch self {
+        case .oneMinute: 60
+        case .fiveMinutes: 300
+        case .fifteenMinutes: 900
+        }
+    }
+    var buckets: Int { self == .fifteenMinutes ? 90 : 60 }
+}
+
+/// One Target's line: its ICMP Probe, else its first Probe.
+struct Series: Identifiable {
+    var target: String
+    var probe: Probe
+    var color: Color
+    var points: [GraphPoint]
+    var id: String { target }
+
+    /// Over the whole range, for the legend.
+    var p50: Double?
+    var loss: Double
+
+    static func all(_ d: Dashboard, range: GraphRange, palette: Palette) -> [Series] {
+        let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
+        return targets.enumerated().compactMap { i, target in
+            let probe = Probe(target: target, protocol: "icmp")
+            guard let results = d.results[probe], !results.isEmpty else { return nil }
+            let from = d.now - range.seconds
+            let inRange = results.filter { $0.at > from }
+            let replies = inRange.compactMap(\.rttMs)
+            return Series(
+                target: target, probe: probe, color: palette.series(i),
+                points: GraphBuckets.points(results, from: from, to: d.now + 1, count: range.buckets, aggregate: .p50),
+                p50: Aggregate.p50.value(ofSamples: replies),
+                loss: inRange.isEmpty ? 0 : 1 - Double(replies.count) / Double(inRange.count))
+        }
+    }
+}
+
+// MARK: - Latency
+
+struct LatencyCard: View {
+    let dashboard: Dashboard
+    @Binding var range: GraphRange
+    @State private var hidden: Set<String> = []
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let all = Series.all(dashboard, range: range, palette: palette)
+        let shown = all.filter { !hidden.contains($0.target) }
+        Card(title: "Latency", accent: palette.color("color.section.latency")) {
+            RangePicker(range: $range)
+        } content: {
+            LatencyChart(series: shown, now: dashboard.now, range: range)
+                .frame(height: 190)
+                .overlay {
+                    if all.isEmpty {
+                        Text(dashboard.path.satisfied ? "Collecting…" : "Paused: no network path")
+                            .font(.footnote).foregroundStyle(palette.textWeak)
+                    }
+                }
+            VStack(spacing: 2) {
+                ForEach(all) { s in
+                    LegendRow(series: s, jitter: dashboard.stats[s.probe]?.jitterMs, hidden: hidden.contains(s.target))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.smooth) {
+                                if hidden.remove(s.target) == nil { hidden.insert(s.target) }
+                            }
+                        }
+                        .sensoryFeedback(.selection, trigger: hidden.contains(s.target))
+                }
+            }
+        }
+    }
+}
+
+private struct LatencyChart: View {
+    let series: [Series]
+    let now: Double
+    let range: GraphRange
+    @Environment(\.palette) private var palette
+
+    private struct Plot: Identifiable {
+        var id: String { "\(key)@\(x)" }
+        var key: String
+        var x: Double
+        var y: Double
+        var color: Color
+        var loss: Double
+    }
+
+    var body: some View {
+        let yMax = yMax
+        let (lines, dots) = plots(yMax: yMax)
+        Chart {
+            ForEach(lines) { p in
+                // A wide, faint stroke under the line reads as a glow on the dark surface.
+                LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Glow", "g" + p.key))
+                    .foregroundStyle(p.color.opacity(0.22))
+                    .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.monotone)
+                LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Line", p.key))
+                    .foregroundStyle(p.color)
+                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.monotone)
+            }
+            // Loss as a strip along the floor, one tick per bucket at its worst Target's loss:
+            // per-line dots buried the lines whenever every Target was losing.
+            ForEach(dots) { d in
+                RectangleMark(xStart: .value("Time", d.x), xEnd: .value("Time", d.x + width),
+                              yStart: .value("ms", 0), yEnd: .value("ms", yMax * 0.06))
+                    .foregroundStyle(palette.loss.opacity(0.25 + 0.75 * min(1, d.loss * 2.5)))
+            }
+        }
+        .chartXScale(domain: -range.seconds...0)
+        .chartYScale(domain: 0...yMax)
+        .chartXAxis {
+            AxisMarks(values: Array(stride(from: -range.seconds, through: 0, by: range.seconds / 3))) { v in
+                AxisGridLine().foregroundStyle(palette.cardEdge)
+                AxisValueLabel {
+                    if let s = v.as(Double.self) {
+                        Text(s == 0 ? "now" : "\(Int(s / 60))m").foregroundStyle(palette.textWeak)
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { v in
+                AxisGridLine().foregroundStyle(palette.cardEdge)
+                AxisValueLabel {
+                    if let ms = v.as(Double.self) { Text("\(Int(ms))").foregroundStyle(palette.textWeak) }
+                }
+            }
+        }
+        .chartLegend(.hidden)
+        .monospacedDigit()
+        .animation(.smooth(duration: 0.4), value: series.map(\.target))
+    }
+
+    /// Room above the busiest line, ignoring its rarest spikes.
+    private var yMax: Double {
+        let values = series.flatMap { $0.points.compactMap(\.value) }.sorted()
+        guard !values.isEmpty else { return 50 }
+        let p98 = values[Int(Double(values.count - 1) * 0.98)]
+        return max(10, p98 * 1.25)
+    }
+
+    private var width: Double { range.seconds / Double(range.buckets) }
+
+    /// Lines broken at buckets with no reply, and each bucket's worst loss across the shown Targets.
+    private func plots(yMax: Double) -> ([Plot], [Plot]) {
+        var lines: [Plot] = [], worstLoss: [Double: Double] = [:]
+        for s in series {
+            var segment = 0
+            for p in s.points {
+                let x = p.start - now
+                if let v = p.value {
+                    lines.append(Plot(key: "\(s.target)#\(segment)", x: x, y: min(v, yMax), color: s.color, loss: p.loss))
+                } else {
+                    segment += 1
+                }
+                if p.loss > 0 { worstLoss[x] = max(worstLoss[x] ?? 0, p.loss) }
+            }
+        }
+        let dots = worstLoss.map { Plot(key: "loss", x: $0.key, y: 0, color: palette.loss, loss: $0.value) }
+        return (lines, dots)
+    }
+}
+
+private struct LegendRow: View {
+    let series: Series
+    let jitter: Double?
+    let hidden: Bool
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(hidden ? Color.clear : series.color)
+                .overlay(Circle().strokeBorder(series.color, lineWidth: 1.5))
+                .frame(width: 9, height: 9)
+            Text(targetName(series.target))
+                .foregroundStyle(hidden ? palette.textWeak : palette.text)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 6)
+            Text("p50 \(ms(series.p50)) ms").foregroundStyle(palette.text)
+            Text(percent(series.loss))
+                .foregroundStyle(percent(series.loss) != "0%" ? palette.loss : palette.textWeak)
+                .frame(width: 38, alignment: .trailing)
+            Text(jitter.map { "±\(ms($0))" } ?? "")
+                .foregroundStyle(palette.textWeak)
+                .frame(width: 44, alignment: .trailing)
+        }
+        .font(.caption.weight(.medium))
+        .monospacedDigit()
+        .padding(.vertical, 3)
+        .opacity(hidden ? 0.6 : 1)
+    }
+}
+
+struct RangePicker: View {
+    @Binding var range: GraphRange
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(GraphRange.allCases) { r in
+                Button(r.rawValue) { withAnimation(.smooth) { range = r } }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(range == r ? palette.text : palette.textWeak)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background { if range == r { Capsule().fill(palette.cardEdge) } }
+            }
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: range)
+    }
+}
+
+// MARK: - Targets
+
+struct TargetGrid: View {
+    let dashboard: Dashboard
+    let range: GraphRange
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let series = Series.all(dashboard, range: range, palette: palette)
+        let byTarget = Dictionary(grouping: Set(dashboard.stats.keys).union(dashboard.denied), by: \.target)
+        let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { byTarget[$0] != nil }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {
+            ForEach(targets, id: \.self) { target in
+                TargetCard(target: target, probes: byTarget[target] ?? [], dashboard: dashboard,
+                           series: series.first { $0.target == target })
+            }
+        }
+    }
+}
+
+private struct TargetCard: View {
+    let target: String
+    let probes: [Probe]
+    let dashboard: Dashboard
+    let series: Series?
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let sorted = probes.sorted { order($0) < order($1) }
+        let lead = sorted.first.flatMap { dashboard.stats[$0] }
+        let accent = series?.color ?? palette.color("color.section.cpu")
+        Card(title: targetName(target), accent: accent) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(ms(lead?.rttMs))
+                    .font(.system(size: 30, weight: .semibold, design: .rounded))
+                    .foregroundStyle(palette.text)
+                    .contentTransition(.numericText())
+                Text("ms").font(.caption).foregroundStyle(palette.textWeak)
+                Spacer()
+                if let loss = lead?.loss, loss > 0 {
+                    Text(percent(loss))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(palette.loss)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(palette.loss.opacity(0.15)))
+                }
+            }
+            .monospacedDigit()
+            if target == Probe.gateway, let gw = dashboard.path.gateway {
+                Text(gw).font(.caption).foregroundStyle(palette.textWeak).lineLimit(1).padding(.top, -8)
+            }
+            if let series { Sparkline(series: series).frame(height: 34) }
+            VStack(spacing: 4) {
+                ForEach(sorted, id: \.self) { p in
+                    HStack {
+                        Text(label(p)).foregroundStyle(palette.textWeak)
+                        Spacer()
+                        value(p)
+                    }
+                }
+            }
+            .font(.caption)
+            .monospacedDigit()
+        }
+        .animation(.smooth, value: lead?.rttMs)
+    }
+
+    @ViewBuilder private func value(_ p: Probe) -> some View {
+        if dashboard.denied.contains(p) {
+            // Not a loss: the OS refused to send it (rules/probe-stats.md).
+            Text("LAN denied").foregroundStyle(palette.severity(.warn))
+        } else if let s = dashboard.stats[p] {
+            HStack(spacing: 6) {
+                if s.loss > 0 { Text(percent(s.loss)).foregroundStyle(palette.loss) }
+                Text("\(ms(s.rttMs)) ms").foregroundStyle(palette.text)
+            }
+        }
+    }
+
+    private func order(_ p: Probe) -> Int {
+        p.protocol == "icmp" ? 0 : p.protocol.hasPrefix("tcp") ? 1 : p.protocol.hasPrefix("udp") ? 2 : 3
+    }
+
+    private func label(_ p: Probe) -> String {
+        let parts = p.protocol.split(separator: ":")
+        return parts.map { $0.uppercased() }.joined(separator: " ")
+    }
+}
+
+private struct Sparkline: View {
+    let series: Series
+
+    var body: some View {
+        let values = series.points.compactMap(\.value)
+        let top = max(values.max() ?? 1, 1) * 1.1
+        Chart {
+            ForEach(Array(series.points.enumerated()), id: \.offset) { i, p in
+                if let v = p.value {
+                    AreaMark(x: .value("i", i), y: .value("ms", v))
+                        .foregroundStyle(LinearGradient(colors: [series.color.opacity(0.35), series.color.opacity(0)],
+                                                        startPoint: .top, endPoint: .bottom))
+                        .interpolationMethod(.monotone)
+                    LineMark(x: .value("i", i), y: .value("ms", v))
+                        .foregroundStyle(series.color)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        .interpolationMethod(.monotone)
+                }
+            }
+        }
+        .chartXScale(domain: 0...max(series.points.count - 1, 1))
+        .chartYScale(domain: 0...top)
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Hop Trace
+
+struct HopTraceCard: View {
+    let target: String
+    let rows: [HopRow]
+    let names: [String: String]
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let (shown, silent) = HopTrace.collapsingSilentTail(rows)
+        let worst = max(shown.compactMap(\.avgMs).max() ?? 1, 1)
+        Card(title: "Hop Trace", accent: palette.color("color.section.network")) {
+            Text(target).font(.caption).foregroundStyle(palette.textWeak).lineLimit(1).truncationMode(.middle)
+        } content: {
+            Grid(alignment: .trailing, horizontalSpacing: 10, verticalSpacing: 8) {
+                GridRow {
+                    Text("#")
+                    Text("Host").gridColumnAlignment(.leading)
+                    Text("Loss"); Text("Avg"); Text("Best"); Text("Wrst")
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(palette.textWeak)
+                ForEach(shown, id: \.ttl) { row in
+                    GridRow {
+                        Text("\(row.ttl)").foregroundStyle(palette.textWeak)
+                        host(row, worst: worst)
+                        Text(row.addr == nil ? "" : percent(row.loss))
+                            .foregroundStyle(row.loss > 0 ? palette.loss : palette.textWeak)
+                        Text(ms(row.avgMs)); Text(ms(row.bestMs)); Text(ms(row.worstMs))
+                    }
+                    .foregroundStyle(palette.text)
+                }
+            }
+            .font(.caption)
+            .monospacedDigit()
+            if let silent {
+                Text("Hops \(silent.lowerBound)–\(silent.upperBound): no reply")
+                    .font(.caption).foregroundStyle(palette.textWeak)
+            }
+        }
+    }
+
+    /// Like mtr: the name when reverse DNS has one, the address beneath it, and a bar for average latency.
+    private func host(_ row: HopRow, worst: Double) -> some View {
+        let name = row.addr.flatMap { names[$0] }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(name ?? row.addr ?? "no reply")
+                .foregroundStyle(row.addr == nil ? palette.textWeak : palette.text)
+                .lineLimit(1).truncationMode(.middle)
+            if name != nil, let addr = row.addr {
+                Text(addr).font(.caption2).foregroundStyle(palette.textWeak).lineLimit(1).truncationMode(.middle)
+            }
+            if let avg = row.avgMs {
+                GeometryReader { g in
+                    Capsule()
+                        .fill(row.loss > 0 ? palette.loss : palette.color("color.section.network"))
+                        .frame(width: max(3, g.size.width * avg / worst))
+                }
+                .frame(height: 3)
+                .opacity(0.8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
