@@ -37,7 +37,7 @@ Screenshots are rendered by CI from demo data on every change to `main`.
 ## Scope
 
 - Measures only while the app is open: no widget, no Live Activity ([ADR 0004](docs/adr/0004-foreground-only.md)).
-- History is kept per network: every result for 2 hours, then 5-minute, hourly and daily summaries for 24 hours, 7 days and a year. Time the app was closed shows as Paused ([ADR 0015](docs/adr/0015-history-follows-spec-5.md)).
+- History is kept per network: every result for 2 hours, then 5-minute, hourly and daily summaries for 24 hours, 7 days and a year. Time the app was closed shows as Paused ([ADR 0015](docs/adr/0015-history-follows-spec-5.md), [ADR 0016](docs/adr/0016-history-on-disk.md)).
 - No system-wide CPU or memory: iOS doesn't expose them to apps.
 - After launch, a return to the app or a network change, Probes wait for the route to hold for 1 s, so a Wi-Fi to cellular switch isn't recorded as loss ([ADR 0012](docs/adr/0012-backgrounding-is-a-pause.md), [ADR 0013](docs/adr/0013-probes-wait-for-the-path-to-settle.md)).
 - iOS Local Network Privacy asks before the app sends TCP or DNS to the Gateway; if you decline, those Probes show as `denied`, never as loss. ICMP isn't gated, and you can change the choice in Settings > Privacy & Security > Local Network ([research](docs/research/local-network-privacy.md)).
