@@ -68,21 +68,23 @@ enum Demo: String, CaseIterable {
         }
         if self != .offline && self != .captive { (d.hops, d.hopNames) = hops }
         // A week of Rollups takes a while to make in a Debug build: only for a range that shows them.
-        if Self.launchRange?.usesRollups ?? true {
+        if (Self.launchRange?.fixedSeconds ?? .infinity) > ram {
             d.history = rollups(defaults: defaults, now: now, link: d.path.link, rng: &rng)
         }
         return d
     }
 
-    /// A week of minutes: the phone was in use by day and the app closed overnight, so nights
-    /// are gaps. In the ISP scenario the trouble starts two hours ago.
+    /// A week of minutes before the RAM History begins, so storage hands over to RAM there: the
+    /// phone was in use by day and the app closed overnight, so nights are gaps. In the ISP
+    /// scenario the trouble starts two hours ago.
     @MainActor
     private func rollups(defaults: Defaults, now: Double, link: Link, rng: inout SplitMix64) -> RollupHistory {
-        let history = RollupHistory(keepDays: defaults.history.rollupDays)
+        let history = RollupHistory(keepDays: defaults.history.rollupDays, maxTimeoutMs: defaults.maxTimeoutMs)
         let nowMinute = Int(now / 60)
+        let ramStartMinute = Int((now - Double(defaults.history.ramMinutes * 60) + 1) / 60)
         let first = nowMinute - defaults.history.rollupDays * 24 * 60 + 1
         for probe in defaults.probeGroup.probes {
-            for minute in first...nowMinute {
+            for minute in first..<ramStartMinute {
                 let hour = (minute / 60) % 24
                 if (1...6).contains(hour) && nowMinute - minute > 120 { continue }
                 let troubled = self == .ispLoss && nowMinute - minute <= 120
