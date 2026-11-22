@@ -18,7 +18,7 @@ final class Monitor {
     var dashboard: Dashboard {
         Dashboard(findings: snapshot.findings, stats: snapshot.stats, denied: snapshot.denied, path: path,
                   hops: snapshot.hops, hopNames: hopNames, results: snapshot.results, now: now,
-                  history: history, layout: layout, captivePortal: snapshot.captivePortal,
+                  history: history, layout: layout, live: true, captivePortal: snapshot.captivePortal,
                   publicAddress: snapshot.publicAddress)
     }
 
