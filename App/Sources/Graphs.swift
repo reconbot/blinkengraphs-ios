@@ -113,10 +113,12 @@ private struct LatencyChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
             }
+            // Loss as a strip along the floor, one tick per bucket at its worst Target's loss:
+            // per-line dots buried the lines whenever every Target was losing.
             ForEach(dots) { d in
-                PointMark(x: .value("Time", d.x), y: .value("ms", d.y))
-                    .foregroundStyle(palette.loss)
-                    .symbolSize(14 + 90 * d.loss)
+                RectangleMark(xStart: .value("Time", d.x), xEnd: .value("Time", d.x + width),
+                              yStart: .value("ms", 0), yEnd: .value("ms", yMax * 0.06))
+                    .foregroundStyle(palette.loss.opacity(0.25 + 0.75 * min(1, d.loss * 2.5)))
             }
         }
         .chartXScale(domain: -range.seconds...0)
@@ -152,9 +154,11 @@ private struct LatencyChart: View {
         return max(10, p98 * 1.25)
     }
 
-    /// Lines broken at buckets with no reply; a loss dot on the line, or along the top when nothing replied.
+    private var width: Double { range.seconds / Double(range.buckets) }
+
+    /// Lines broken at buckets with no reply, and each bucket's worst loss across the shown Targets.
     private func plots(yMax: Double) -> ([Plot], [Plot]) {
-        var lines: [Plot] = [], dots: [Plot] = []
+        var lines: [Plot] = [], worstLoss: [Double: Double] = [:]
         for s in series {
             var segment = 0
             for p in s.points {
@@ -164,12 +168,10 @@ private struct LatencyChart: View {
                 } else {
                     segment += 1
                 }
-                if p.loss > 0 {
-                    dots.append(Plot(key: "loss-\(s.target)", x: x, y: min(p.value ?? yMax * 0.97, yMax),
-                                     color: s.color, loss: p.loss))
-                }
+                if p.loss > 0 { worstLoss[x] = max(worstLoss[x] ?? 0, p.loss) }
             }
         }
+        let dots = worstLoss.map { Plot(key: "loss", x: $0.key, y: 0, color: palette.loss, loss: $0.value) }
         return (lines, dots)
     }
 }
@@ -255,10 +257,6 @@ private struct TargetCard: View {
         let lead = sorted.first.flatMap { dashboard.stats[$0] }
         let accent = series?.color ?? palette.color("color.section.cpu")
         Card(title: targetName(target), accent: accent) {
-            if target == Probe.gateway, let gw = dashboard.path.gateway {
-                Text(gw).font(.caption2).foregroundStyle(palette.textWeak).lineLimit(1)
-            }
-        } content: {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(ms(lead?.rttMs))
                     .font(.system(size: 30, weight: .semibold, design: .rounded))
@@ -275,7 +273,10 @@ private struct TargetCard: View {
                 }
             }
             .monospacedDigit()
-            if let series { Sparkline(series: series) .frame(height: 34) }
+            if target == Probe.gateway, let gw = dashboard.path.gateway {
+                Text(gw).font(.caption).foregroundStyle(palette.textWeak).lineLimit(1).padding(.top, -8)
+            }
+            if let series { Sparkline(series: series).frame(height: 34) }
             VStack(spacing: 4) {
                 ForEach(sorted, id: \.self) { p in
                     HStack {

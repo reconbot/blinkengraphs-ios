@@ -31,7 +31,7 @@ struct DashboardView: View {
             .defaultScrollAnchor(UserDefaults.standard.string(forKey: "anchor") == "bottom" ? .bottom : .top)
             .background(palette.background.ignoresSafeArea())
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Wordmark(severity: worst) }
+                ToolbarItem(placement: .principal) { Wordmark(severity: worst) }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     reportMenu
                     Button("Settings", systemImage: "gearshape") { showingSettings = true }
@@ -126,7 +126,7 @@ private struct VerdictBanner: View {
                     .foregroundStyle(tint)
                     .symbolEffect(.pulse, isActive: lead?.severity == .crit)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(lead.map { domainName($0.domain) } ?? "Verdict")
+                    Text(lead.map { $0.domain == .clear ? "Verdict" : domainName($0.domain) } ?? "Verdict")
                         .font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.8)
                         .foregroundStyle(tint)
                     Text(lead?.headline ?? "Measuring…")

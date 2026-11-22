@@ -22,7 +22,8 @@ enum Demo: String, CaseIterable {
             var t = now - ram + 1
             while t <= end {
                 let spike = shape.spikeEvery > 0 && Int(t) % shape.spikeEvery < 20
-                let lost = rng.unit() < shape.loss + (spike ? 0.25 : 0)
+                // Only the ISP scenario loses Probes in its spikes; elsewhere a spike is latency alone.
+                let lost = rng.unit() < shape.loss + (spike && self == .ispLoss ? 0.25 : 0)
                 let rtt = shape.base + abs(rng.normal()) * shape.jitter + (spike ? shape.base * 0.8 : 0)
                 h.record(ProbeResult(at: t, rttMs: lost ? nil : rtt))
                 t += 1
