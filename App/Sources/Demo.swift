@@ -47,6 +47,8 @@ enum Demo: String, CaseIterable {
         let cell = Link(interface: "pdp_ip0", gateway: nil)
         let withCellular = self == .wifi || self == .ispLoss
         m.setActiveLinks(withCellular ? [link, cell] : [link])
+        // The switch in the Networks card reads this; it matches what the demo measures.
+        UserDefaults.standard.set(withCellular, forKey: Monitor.measureCellularKey)
         var t = start + 0.2
         while t <= end {
             let outcomes: [(Probe, Measurements.Outcome)] = defaults.probeGroup.probes.compactMap { probe in
