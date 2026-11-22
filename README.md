@@ -8,7 +8,7 @@ A network diagnosis tool for iPhone and iPad. It shows live latency, DNS, path s
   <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/wifi-light-bottom.png" width="230" alt="Hop Trace in light mode">
 </p>
 
-**Status:** 1.0. It builds from source and sideloads onto your own device; not on the App Store yet ([ADR 0003](docs/adr/0003-sideload-first.md)). It is the iOS member of the [blinkengraphs](https://github.com/reconbot/blinkengraphs) family; the [Windows version](https://github.com/reconbot/blinkengraphs-win) also ships.
+**Status:** 1.0, not on the App Store yet ([ADR 0003](docs/adr/0003-sideload-first.md)). Each [release](https://github.com/reconbot/blinkengraphs-ios/releases/latest), and the rolling [`main-latest`](https://github.com/reconbot/blinkengraphs-ios/releases/tag/main-latest) prerelease, carries an unsigned IPA to sideload with AltStore or Sideloadly, which sign it with your Apple ID. Or build from source below. It is the iOS member of the [blinkengraphs](https://github.com/reconbot/blinkengraphs) family; the [Windows version](https://github.com/reconbot/blinkengraphs-win) also ships.
 
 ## What it shows
 
