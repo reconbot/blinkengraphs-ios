@@ -21,4 +21,29 @@ struct Dashboard: Sendable {
     var live = false
     var captivePortal = false
     var publicAddress: [IPFamily: PublicAddressReading] = [:]
+    /// Every measured Link, the default-route one first, each judged on its own Probes.
+    var links: [Measurements.LinkState] = []
+    /// A cellular Link is there but the user hasn't turned on measuring it.
+    var unmeasuredCellular = false
+}
+
+extension Link {
+    /// What a person calls this Link. iPhones name Wi-Fi `en0`; extra `en` interfaces are wired.
+    var kindName: String {
+        if interface.hasPrefix("pdp_ip") { return "Cellular" }
+        if interface.hasPrefix("utun") || interface.hasPrefix("ipsec") { return "VPN" }
+        if interface == "en0" { return "Wi-Fi" }
+        if interface.hasPrefix("en") { return "Ethernet" }
+        return interface
+    }
+
+    /// The Section color the Link's line takes in Compare.
+    var colorToken: String {
+        switch kindName {
+        case "Wi-Fi": "color.section.network"
+        case "Cellular": "color.section.upload"
+        case "VPN": "color.section.memory"
+        default: "color.section.cpu"
+        }
+    }
 }

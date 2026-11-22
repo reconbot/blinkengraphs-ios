@@ -43,6 +43,12 @@ enum Demo: String, CaseIterable {
         var m = Measurements(defaults: defaults, settle: 0, history: seeded)
         m.setPath(link: link, up: true, viaVPN: d.path.vpn)
         m.resume(at: start)
+        // With cellular measured too, Wi-Fi scenarios show two networks side by side.
+        let cell = Link(interface: "pdp_ip0", gateway: nil)
+        let withCellular = self == .wifi || self == .ispLoss
+        m.setActiveLinks(withCellular ? [link, cell] : [link])
+        // The switch in the Networks card reads this; it matches what the demo measures.
+        UserDefaults.standard.set(withCellular, forKey: Monitor.measureCellularKey)
         var t = start + 0.2
         while t <= end {
             let outcomes: [(Probe, Measurements.Outcome)] = defaults.probeGroup.probes.compactMap { probe in
@@ -54,6 +60,13 @@ enum Demo: String, CaseIterable {
                 return (probe, lost ? .lost : .reply(ms: rtt))
             }
             m.commit(.init(start: t, end: t + 0.3, link: link, outcomes: outcomes))
+            if withCellular {
+                let carrier: [(Probe, Measurements.Outcome)] = defaults.probeGroup.probes.compactMap { probe in
+                    guard let shape = Demo.cellular.shape(probe) else { return nil }
+                    return (probe, .reply(ms: shape.base + abs(rng.normal()) * shape.jitter))
+                }
+                m.commit(.init(start: t, end: t + 0.3, link: cell, outcomes: carrier))
+            }
             t += 1
         }
         m.setCaptivePortal(self == .captive, checkedOn: link)
@@ -63,6 +76,7 @@ enum Demo: String, CaseIterable {
         d.findings = snapshot.findings
         d.stats = snapshot.stats
         d.window = snapshot.window
+        d.links = snapshot.links
         d.history = m.history
         d.captivePortal = snapshot.captivePortal
         // Documentation addresses (RFC 5737, RFC 3849), never a real one.
