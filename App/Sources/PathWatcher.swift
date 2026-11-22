@@ -1,3 +1,4 @@
+import CoreTelephony
 import Foundation
 import Network
 
@@ -9,6 +10,13 @@ struct PathState: Equatable, Sendable {
     var gateway: String?
     var expensive = false
     var constrained = false
+    var ipv4 = false
+    var ipv6 = false
+    var dns = false
+    /// iOS 26+: Apple's coarse rating of the link layer. Only for display; Apple says not to gate on it.
+    var linkQuality: String?
+    /// LTE, 5G and so on, when the path uses cellular.
+    var radio: String?
 
     init() {}
 
@@ -29,6 +37,35 @@ struct PathState: Equatable, Sendable {
         }.first
         expensive = path.isExpensive
         constrained = path.isConstrained
+        ipv4 = path.supportsIPv4
+        ipv6 = path.supportsIPv6
+        dns = path.supportsDNS
+        if #available(iOS 26, *) {
+            switch path.linkQuality {
+            case .good: linkQuality = "Good"
+            case .moderate: linkQuality = "Moderate"
+            case .minimal: linkQuality = "Minimal"
+            default: linkQuality = nil
+            }
+        }
+        if path.usesInterfaceType(.cellular) { radio = Self.currentRadio() }
+    }
+
+    /// The data SIM's radio technology. Cell ID and signal strength have no public API.
+    private static func currentRadio() -> String? {
+        let info = CTTelephonyNetworkInfo()
+        guard let techs = info.serviceCurrentRadioAccessTechnology else { return nil }
+        let tech = info.dataServiceIdentifier.flatMap { techs[$0] } ?? techs.values.first
+        switch tech {
+        case CTRadioAccessTechnologyNR: return "5G"
+        case CTRadioAccessTechnologyNRNSA: return "5G NSA"
+        case CTRadioAccessTechnologyLTE: return "LTE"
+        case CTRadioAccessTechnologyWCDMA, CTRadioAccessTechnologyHSDPA, CTRadioAccessTechnologyHSUPA,
+             CTRadioAccessTechnologyCDMAEVDORev0, CTRadioAccessTechnologyCDMAEVDORevA,
+             CTRadioAccessTechnologyCDMAEVDORevB, CTRadioAccessTechnologyeHRPD: return "3G"
+        case CTRadioAccessTechnologyEdge, CTRadioAccessTechnologyGPRS, CTRadioAccessTechnologyCDMA1x: return "2G"
+        default: return nil
+        }
     }
 }
 
