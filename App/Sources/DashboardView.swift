@@ -333,10 +333,8 @@ private struct Footer: View {
 }
 
 
-func ms(_ v: Double?) -> String {
-    guard let v else { return "—" }
-    return v < 10 ? String(format: "%.1f", v) : "\(Int(v.rounded()))"
-}
+/// spec rules/probe-stats.md: displays show whole milliseconds.
+func ms(_ v: Double?) -> String { v.map(RTT.display) ?? "—" }
 
 func percent(_ loss: Double) -> String { "\(Int((loss * 100).rounded()))%" }
 

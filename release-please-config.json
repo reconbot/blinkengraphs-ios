@@ -8,8 +8,7 @@
           "type": "generic",
           "path": "project.yml"
         }
-      ],
-      "release-as": "2.0.0"
+      ]
     }
   }
 }

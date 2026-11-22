@@ -85,24 +85,22 @@ enum CaptivePortalCheck {
 // MARK: - Public Address
 
 /// spec rules/public-address.md: per IP version, a TXT whoami sent straight to Cloudflare's
-/// nameserver and an HTTPS checkip, read together.
+/// nameserver and an HTTPS lookup of that version's icanhazip URL, read together.
 enum PublicAddressLookup {
     static func run(_ family: IPFamily, _ config: Defaults.PublicAddressDefaults) async -> PublicAddressReading {
         async let txt = offPool { () -> [String]? in
             guard let server = Sockets.resolve(config.dnsServer, v6: family == .ipv6) else { return nil }
             return Sockets.dnsTXT(config.dnsName, server: server, timeout: .seconds(3))
         }
-        async let body = https(config.httpsURL, family: family)
+        async let body = https(config.httpsURL(family))
         return PublicAddress.read(family: family, dnsTXT: await txt, httpsBody: await body)
     }
 
-    /// One HTTP/1.1 GET over TLS, held to one IP version, which URLSession can't do.
-    static func https(_ urlString: String, family: IPFamily) async -> String? {
+    /// One HTTP/1.1 GET over TLS. The family isn't pinned: each URL's host has addresses of one
+    /// version only, and an IPv4-only host stays reachable through NAT64 on an IPv6-only path.
+    static func https(_ urlString: String) async -> String? {
         guard let url = URL(string: urlString), let host = url.host else { return nil }
         let params = NWParameters.tls
-        if let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ip.version = family == .ipv6 ? .v6 : .v4
-        }
         let connection = NWConnection(host: NWEndpoint.Host(host), port: 443, using: params)
         let path = url.path.isEmpty ? "/" : url.path
         let request = "GET \(path) HTTP/1.1\r\nHost: \(host)\r\nUser-Agent: blinkengraphs\r\nConnection: close\r\n\r\n"
@@ -127,7 +125,7 @@ enum PublicAddressLookup {
         else { return nil }
         let headers = text[..<split.lowerBound].lowercased()
         let body = String(text[split.upperBound...])
-        // checkip's answer fits one chunk: its size line, then the address.
+        // The address fits one chunk: its size line, then the address.
         if headers.contains("transfer-encoding: chunked") {
             let lines = body.components(separatedBy: "\r\n")
             return lines.count > 1 ? lines[1] : nil
