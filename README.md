@@ -14,7 +14,7 @@ A network diagnosis tool for iPhone and iPad. It shows live latency, DNS, path s
 
 - **Verdict:** names the fault, following the spec's rules: LAN or Wi-Fi, ISP, IPv4 or IPv6 broken, DNS, a remote host, ping filtering, a VPN or its exit, a captive portal, or no network at all.
 - **Latency:** a gping-style chart with one line per Target (Gateway, Cloudflare, Quad9, over IPv4 and IPv6) and a loss strip. Ranges are 1m, 15m, 1h, 24h and 7d, and each point shows p95 by default.
-- **Targets:** ICMP, TCP 443 and DNS per Target, including your own DNS server, with sparklines.
+- **Targets:** ICMP, TCP 443 and DNS per Target, including your own DNS server, with sparklines. Add or edit Targets in Settings; typing offers the Gateway and System DNS presets.
 - **Hop Trace:** mtr-style, with router names and the silent tail collapsed.
 - **Public Address:** your IPv4 and IPv6 as the internet sees them, from a DNS and an HTTPS lookup, flagged when the two disagree.
 - **Reports:** copy or share a plain-text report, optionally redacted, for bug reports.
@@ -24,6 +24,7 @@ A network diagnosis tool for iPhone and iPad. It shows live latency, DNS, path s
 |---|---|---|
 | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/wifi-dark-top.png" width="220"><br>All clear | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/cellular-light-top.png" width="220"><br>5G, IPv6-only | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/vpn-dark-top.png" width="220"><br>Through a VPN |
 | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/captive-dark-top.png" width="220"><br>Captive portal | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/offline-dark-top.png" width="220"><br>Offline | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/range-7d-wifi-light.png" width="220"><br>7 days |
+| <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/settings-dark.png" width="220"><br>Settings | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/targets-light.png" width="220"><br>Targets | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/target-new-dark.png" width="220"><br>New Target, with presets |
 
 Screenshots are rendered by CI from demo data on every change to `main`.
 
