@@ -23,6 +23,8 @@ jobs:
         with:
           submodules: true
       - run: brew install xcodegen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
       - run: xcodegen generate
       - name: Pick an iPhone simulator
         run: |
@@ -46,12 +48,20 @@ jobs:
           app=build/Build/Products/Debug-iphonesimulator/Blinkengraphs.app
           bid=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
           # After the build, not during it: the first boot's data migration slowed the build from 42 s to 4m41s.
-          xcrun simctl boot "$UDID" || true
+          # First-boot jobs off (.github/simulator-quiet-jobs.txt): they kept the runner busy for minutes.
+          quiet=()
+          while IFS= read -r label; do
+            label="${label%%#*}"; label="${label//[[:space:]]/}"
+            [ -n "$label" ] && quiet+=("--disabledJob=$label")
+          done < .github/simulator-quiet-jobs.txt
+          xcrun simctl boot "$UDID" "${quiet[@]}" || true
           xcrun simctl bootstatus "$UDID" -b >/dev/null
           t booted
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
             --wifiBars 3 --cellularBars 4 --dataNetwork wifi
+          t status bar
           xcrun simctl install "$UDID" "$app"
+          t install
           docs="$(xcrun simctl get_app_container "$UDID" "$bid" data)/Documents"
           t installed
           mkdir -p out
@@ -70,9 +80,7 @@ jobs:
             local t3=$(ms)
             xcrun simctl io "$UDID" screenshot "out/$name.png" 2>/dev/null
             local t4=$(ms)
-            # Half size: still sharp on a PR, a quarter of the bytes on the branch.
-            sips -Z 1311 "out/$name.png" >/dev/null
-            echo "timing $name terminate=$((t1-t0)) launch=$((t2-t1)) ready=$((t3-t2)) screenshot=$((t4-t3)) resize=$(( $(ms)-t4 )) ms"
+            echo "timing $name terminate=$((t1-t0)) launch=$((t2-t1)) ready=$((t3-t2)) screenshot=$((t4-t3)) ms"
           }
           for look in dark light; do
             xcrun simctl ui "$UDID" appearance "$look"
@@ -90,6 +98,9 @@ jobs:
             shot "range-$3-$1-$2" -demo "$1" -anchor top -range "$3"
           done
           t ranges done
+          # Half size: still sharp on a PR, a quarter of the bytes on the branch. One pass, after capture.
+          sips -Z 1311 out/*.png >/dev/null
+          t resized
           sips -Z 256 App/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out out/app-icon.png >/dev/null
       - name: Index
         run: |
