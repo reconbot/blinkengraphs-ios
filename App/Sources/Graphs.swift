@@ -56,6 +56,7 @@ struct Series: Identifiable {
     var aggregate: Aggregate
     var loss: Double
 
+    @MainActor
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
         return targets.enumerated().compactMap { i, target in
