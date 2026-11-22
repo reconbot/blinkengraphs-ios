@@ -28,7 +28,13 @@ struct Series: Identifiable {
     var probe: Probe
     var color: Color
     var points: [GraphPoint]
+    /// The graphs' right edge, which moves every refresh; buckets don't.
+    var now: Double
+    var range: GraphRange
     var id: String { target }
+
+    /// A bucket's middle against `now`: negative seconds, sliding left as time passes.
+    func x(_ p: GraphPoint) -> Double { p.start + range.bucketWidth / 2 - now }
 
     /// Over the whole range, for the legend.
     var p50: Double?
@@ -44,13 +50,18 @@ struct Series: Identifiable {
             let replies = inRange.compactMap(\.rttMs)
             return Series(
                 target: target, probe: probe, color: palette.series(i),
-                points: GraphBuckets.points(results, from: window.lowerBound, to: window.upperBound,
-                                            count: range.buckets, aggregate: .p50),
+                // One bucket more on the left, so the line runs to the edge as it scrolls.
+                points: GraphBuckets.points(results, from: window.lowerBound - range.bucketWidth,
+                                            to: window.upperBound, count: range.buckets + 1, aggregate: .p50),
+                now: d.now, range: range,
                 p50: Aggregate.p50.value(ofSamples: replies),
                 loss: inRange.isEmpty ? 0 : 1 - Double(replies.count) / Double(inRange.count))
         }
     }
 }
+
+/// How often the Monitor refreshes; graph animations last this long so motion is continuous.
+let refreshSeconds = Double(SpecResources.defaults.probeGroup.latencyMs) / 1000
 
 // MARK: - Latency
 
@@ -97,7 +108,9 @@ private struct LatencyChart: View {
     @Environment(\.palette) private var palette
 
     private struct Plot: Identifiable {
-        var id: String { "\(key)@\(x)" }
+        var id: String { "\(key)@\(start)" }
+        /// The bucket's start: stable across refreshes, so Charts animates a point instead of replacing it.
+        var start: Double
         var key: String
         var x: Double
         var y: Double
@@ -158,9 +171,11 @@ private struct LatencyChart: View {
         }
         .chartLegend(.hidden)
         .monospacedDigit()
+        .chartPlotStyle { $0.clipped() }
         .animation(.smooth(duration: 0.4), value: series.map(\.target))
         .animation(.smooth(duration: 0.5), value: yMax)
-        .animation(.easeOut(duration: 0.6), value: end)
+        // Linear over one refresh interval: the lines glide left continuously, as in gping.
+        .animation(.linear(duration: refreshSeconds), value: now)
     }
 
     /// Room above the busiest line, ignoring its rarest spikes; a round number, so the scale
@@ -173,7 +188,6 @@ private struct LatencyChart: View {
     }
 
     private var width: Double { range.bucketWidth }
-    private var end: Double { range.window(now: now).upperBound }
 
     /// Lines broken at buckets with no reply, and each bucket's worst loss across the shown Targets.
     private func plots(yMax: Double) -> ([Plot], [Plot]) {
@@ -181,17 +195,19 @@ private struct LatencyChart: View {
         for s in series {
             var segment = 0
             for p in s.points {
-                // Each bucket at its middle, against the window's fixed right edge.
-                let x = p.start + width / 2 - end
+                let x = s.x(p)
                 if let v = p.value {
-                    lines.append(Plot(key: "\(s.target)#\(segment)", x: x, y: min(v, yMax), color: s.color, loss: p.loss))
+                    lines.append(Plot(key: "\(s.target)#\(segment)", start: p.start, x: x, y: min(v, yMax),
+                                      color: s.color, loss: p.loss))
                 } else {
                     segment += 1
                 }
-                if p.loss > 0 { worstLoss[x] = max(worstLoss[x] ?? 0, p.loss) }
+                if p.loss > 0 { worstLoss[p.start] = max(worstLoss[p.start] ?? 0, p.loss) }
             }
         }
-        let dots = worstLoss.map { Plot(key: "loss", x: $0.key, y: 0, color: palette.loss, loss: $0.value) }
+        let dots = worstLoss.map { start, loss in
+            Plot(key: "loss", start: start, x: start + width / 2 - now, y: 0, color: palette.loss, loss: loss)
+        }
         return (lines, dots)
     }
 }
@@ -339,31 +355,26 @@ private struct Sparkline: View {
 
     var body: some View {
         let values = series.points.compactMap(\.value)
-        let top = max(values.max() ?? 1, 1) * 1.1
+        let top = GraphBuckets.niceCeiling(max(values.max() ?? 1, 1) * 1.1)
         Chart {
-            ForEach(Array(series.points.enumerated()), id: \.offset) { i, p in
-                if let v = p.value {
-                    AreaMark(x: .value("i", i), y: .value("ms", v))
-                        .foregroundStyle(LinearGradient(colors: [series.color.opacity(0.35), series.color.opacity(0)],
-                                                        startPoint: .top, endPoint: .bottom))
-                        .interpolationMethod(.monotone)
-                    LineMark(x: .value("i", i), y: .value("ms", v))
-                        .foregroundStyle(series.color)
-                        .lineStyle(StrokeStyle(lineWidth: 1.5))
-                        .interpolationMethod(.monotone)
+            ForEach(series.points.filter { $0.value != nil }, id: \.start) { p in
+                AreaMark(x: .value("t", series.x(p)), y: .value("ms", p.value!))
+                    .foregroundStyle(LinearGradient(colors: [series.color.opacity(0.35), series.color.opacity(0)],
+                                                    startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.monotone)
+                LineMark(x: .value("t", series.x(p)), y: .value("ms", p.value!))
+                    .foregroundStyle(series.color)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .interpolationMethod(.monotone)
+                if values.count == 1 {
+                    PointMark(x: .value("t", series.x(p)), y: .value("ms", p.value!))
+                        .foregroundStyle(series.color).symbolSize(16)
                 }
             }
         }
-        .chartXScale(domain: 0...max(series.points.count - 1, 1))
-        .overlay {
-            // One reply so far draws no line: show it as a dot at the right edge.
-            if values.count == 1, let v = values.first {
-                GeometryReader { g in
-                    Circle().fill(series.color).frame(width: 5, height: 5)
-                        .position(x: g.size.width - 3, y: g.size.height * (1 - v / top))
-                }
-            }
-        }
+        .chartXScale(domain: -series.range.seconds...0)
+        .chartPlotStyle { $0.clipped() }
+        .animation(.linear(duration: refreshSeconds), value: series.now)
         .chartYScale(domain: 0...top)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
