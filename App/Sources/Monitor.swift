@@ -10,6 +10,9 @@ final class Monitor {
     private(set) var verdict: [Finding] = Verdict.evaluate(VerdictInput(probes: []))
     private(set) var path = PathState()
     private(set) var hops: [String: [HopRow]] = [:]
+    /// Hop names by address, from reverse DNS (spec rules/hop-trace.md, "Names").
+    private(set) var hopNames: [String: String] = [:]
+    private var namesRequested: Set<String> = []
 
     private let defaults: Defaults
     private let runners: [any ProbeRunner]
@@ -59,16 +62,22 @@ final class Monitor {
         .milliseconds(defaults.probeTimeoutMs(intervalMs: intervalMs))
     }
 
-    /// The Target's IPv4 address, or nil when it can't be probed right now.
+    /// The Target's address, or nil when it can't be probed on this path right now.
+    /// IPv6 Targets need IPv6 on the path. IPv4 ones need IPv4, or IPv6 that iOS may translate
+    /// (464XLAT); a send that then finds no route reports `unreachable`.
     private func address(of target: String) -> String? {
         switch target {
-        case Probe.gateway: path.gateway
-        case Probe.systemDNS: nil
-        default: target
+        case Probe.gateway: return path.gateway
+        case Probe.systemDNS: return nil
+        default:
+            let v6 = Probe(target: target, protocol: "").isIPv6 == true
+            return (v6 ? path.ipv6 : path.ipv4 || path.ipv6) ? target : nil
         }
     }
 
     private func probeOnce() async {
+        // spec rules/probe-stats.md: no network path, no Probes; the Verdict says Offline.
+        guard path.satisfied else { return refreshVerdict() }
         // Results belong to the Link they were sent on, even if the path changes mid-flight.
         let link = path.link
         let timeout = timeout(intervalMs: defaults.probeGroup.latencyMs)
@@ -86,9 +95,21 @@ final class Monitor {
         refreshVerdict()
     }
 
+    /// Once per address, off the main actor; a sweep never waits for it.
+    private func lookUpNames(_ addrs: [String]) {
+        guard defaults.hopTrace.reverseDns else { return }
+        for addr in addrs where namesRequested.insert(addr).inserted {
+            Task { [weak self] in
+                guard let name = await offPool({ Sockets.reverseDNS(addr) }) else { return }
+                self?.hopNames[addr] = name
+            }
+        }
+    }
+
     private func refreshVerdict() {
         stats = linkHistories.stats(on: path.link, windowSeconds: Double(defaults.history.recentWindowS))
-        verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) }))
+        verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) },
+                                                pathUp: path.satisfied))
     }
 
     private func apply(_ state: PathState) {
@@ -113,13 +134,15 @@ final class Monitor {
             // rules/probe-stats.md: not a loss and not recorded; shown outside the Verdict.
             if link == path.link { denied.insert(probe) }
             return
+        case .unreachable:
+            return
         }
         if link == path.link { denied.remove(probe) }
         linkHistories.record(probe, ProbeResult(at: at, rttMs: rtt), on: link)
     }
 
     private func sweepOnce(_ target: String) async {
-        guard let addr = address(of: target) else { return }
+        guard path.satisfied, let addr = address(of: target) else { return }
         let link = path.link
         let cfg = defaults.hopTrace
         var plan = sweepPlans[link]?[target] ?? HopSweepPlan(maxTtl: cfg.maxTtl, fullSweepEveryS: Double(cfg.fullSweepEveryS))
@@ -128,19 +151,22 @@ final class Monitor {
         sweepPlans[link, default: [:]][target] = plan
 
         let timeout = timeout(intervalMs: defaults.probeGroup.traceMs)
-        let results = await withTaskGroup(of: HopResult.self) { group in
+        // A sweep whose sends find no route records nothing: the path can't reach this IP version.
+        let results = await withTaskGroup(of: HopResult?.self) { group in
             for ttl in ttls {
                 group.addTask {
                     switch await offPool({ Sockets.echo(to: addr, ttl: Int32(ttl), timeout: timeout) }) {
                     case .reply(let from, let kind, let ms):
                         HopResult(ttl: ttl, addr: from, rttMs: ms, reached: kind == .echoReply)
+                    case .sendFailed(let e) where noRoute(e):
+                        nil
                     case .timeout, .sendFailed:
                         HopResult(ttl: ttl, addr: nil, rttMs: nil, reached: false)
                     }
                 }
             }
             var results: [HopResult] = []
-            for await r in group { results.append(r) }
+            for await r in group { if let r { results.append(r) } }
             return results
         }
         // Highest TTL first: past the Target every TTL is `reached`, and the lowest reached one,
@@ -148,5 +174,6 @@ final class Monitor {
         for r in results.sorted(by: { $0.ttl > $1.ttl }) { trace.record(r) }
         traces[link, default: [:]][target] = trace
         if link == path.link { hops[target] = trace.table }
+        lookUpNames(trace.table.compactMap(\.addr))
     }
 }
