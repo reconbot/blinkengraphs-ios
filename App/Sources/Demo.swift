@@ -16,30 +16,30 @@ enum Demo: String, CaseIterable {
         var d = Dashboard(path: path, now: now)
         let ram = Double(defaults.history.ramMinutes * 60)
         let end = self == .offline ? now - 95 : now
-        var histories: [Probe: ProbeHistory] = [:]
+        // The same Measurements the app runs, fed generated results, so a screenshot shows what the
+        // rules would really show.
+        var m = Measurements(defaults: defaults)
+        let link = d.path.link
+        m.setPath(link: link, up: true, viaVPN: d.path.vpn)
         for probe in defaults.probeGroup.probes {
             guard let shape = shape(probe) else { continue }
-            var h = ProbeHistory(ramSeconds: ram)
             var t = now - ram + 1
             while t <= end {
                 let spike = shape.spikeEvery > 0 && Int(t) % shape.spikeEvery < 20
                 // Only the ISP scenario loses Probes in its spikes; elsewhere a spike is latency alone.
                 let lost = rng.unit() < shape.loss + (spike && self == .ispLoss ? 0.25 : 0)
                 let rtt = shape.base + abs(rng.normal()) * shape.jitter + (spike ? shape.base * 0.8 : 0)
-                h.record(ProbeResult(at: t, rttMs: lost ? nil : rtt))
+                _ = m.record(probe, lost ? .lost : .reply(ms: rtt), sentOn: link, at: t)
                 t += 1
             }
-            histories[probe] = h
-            d.results[probe] = h.results
-            d.stats[probe] = h.stats(windowSeconds: Double(defaults.history.recentWindowS))
         }
-        if self == .offline {
-            d.stats = [:]
-        }
-        d.captivePortal = self == .captive
-        d.findings = Verdict.evaluate(VerdictInput(probes: d.stats.map { .init(probe: $0.key, stat: $0.value) },
-                                                   pathUp: d.path.satisfied, viaVPN: d.path.vpn,
-                                                   captivePortal: d.captivePortal))
+        m.setCaptivePortal(self == .captive, checkedOn: link)
+        m.setPath(link: link, up: d.path.satisfied, viaVPN: d.path.vpn)
+        let snapshot = m.snapshot()
+        d.findings = snapshot.findings
+        d.stats = snapshot.stats
+        d.results = snapshot.results
+        d.captivePortal = snapshot.captivePortal
         // Documentation addresses (RFC 5737, RFC 3849), never a real one.
         d.publicAddress = switch self {
         case .offline, .captive: [:]
