@@ -18,6 +18,8 @@ concurrency:
 jobs:
   render:
     runs-on: macos-latest
+    # A boot that never finishes must not hold a runner for GitHub's 6-hour default.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -54,8 +56,16 @@ jobs:
             label="${label%%#*}"; label="${label//[[:space:]]/}"
             [ -n "$label" ] && quiet+=("--disabledJob=$label")
           done < .github/simulator-quiet-jobs.txt
+          # Bounded: with the first-boot jobs off, a boot on the iOS 26.5 runtime once never finished.
+          # macOS has no `timeout`; perl's alarm ends bootstatus after the limit.
+          bounded() { perl -e 'alarm shift; exec @ARGV' "$@"; }
           xcrun simctl boot "$UDID" "${quiet[@]}" || true
-          xcrun simctl bootstatus "$UDID" -b >/dev/null
+          if ! bounded 240 xcrun simctl bootstatus "$UDID" -b > bootstatus.log 2>&1; then
+            echo "::warning::Quiet boot didn't finish in 4 min; booting with every job. It was waiting on: $(grep -v '^$' bootstatus.log | tail -3 | tr '\n' ' ')"
+            xcrun simctl shutdown "$UDID" || true
+            xcrun simctl boot "$UDID"
+            xcrun simctl bootstatus "$UDID" -b >/dev/null
+          fi
           t booted
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
             --wifiBars 3 --cellularBars 4 --dataNetwork wifi
