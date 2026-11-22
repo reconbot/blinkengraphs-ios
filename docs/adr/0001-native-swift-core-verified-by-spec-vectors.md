@@ -9,7 +9,7 @@
 
 ## Semantics the vectors require but `rules/verdict.md` does not state
 
-- **Worst-Probe ties go to the last Probe** in input order. The reference uses Rust's `max_by`, which returns the last maximum (vector `isp-loss`: every Internet Probe at 23%, headline names `8.8.8.8`).
+- **Worst-Probe ties go to the first Probe** in Probe Group order, comparing loss as shown, a whole percent. Spec 4.0.0 made this a rule (`verdict.md`, vector `isp-loss-tie`); it used to be the last.
 - **Rule 1 also suppresses the DNS rule** (vector `lan-down`: system DNS at 100% loss, no DNS Finding).
 
-Both belong in the spec's prose; until then they are pinned here and by the vectors.
+The second belongs in the spec's prose; until then it is pinned here and by the vectors.

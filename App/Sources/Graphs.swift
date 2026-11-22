@@ -2,28 +2,7 @@ import BlinkengraphsCore
 import Charts
 import SwiftUI
 
-/// What the history graphs span (spec rules/history.md, "Graph ranges"). Minutes before the
-/// handover come from Rollups, later results from the RAM History.
-enum GraphRange: String, CaseIterable, Identifiable {
-    case oneMinute = "1m", fifteenMinutes = "15m", oneHour = "1h", oneDay = "24h", sevenDays = "7d", all = "All"
-    var id: Self { self }
-    /// Nil for All, whose span depends on what is kept.
-    var fixedSeconds: Double? {
-        switch self {
-        case .oneMinute: 60
-        case .fifteenMinutes: 900
-        case .oneHour: 3600
-        case .oneDay: 86_400
-        case .sevenDays: 604_800
-        case .all: nil
-        }
-    }
-
-    /// All runs from the oldest Minute or RAM result to now, at least 60 s.
-    func span(now: Double, oldest: Double?) -> Double {
-        fixedSeconds ?? max(60, now - (oldest ?? now))
-    }
-
+extension GraphRange {
     /// Gridlines, counted back from now: the step of the shortest fixed range that covers `span`.
     static func axisStep(span: Double) -> Double {
         switch span {
@@ -36,61 +15,46 @@ enum GraphRange: String, CaseIterable, Identifiable {
     }
 }
 
-/// One Target's line, of its charted Probe (TargetLayout).
+/// One Target's line, of its charted Probe (TargetLayout), drawn from one source per range
+/// (spec rules/history.md, "Graph ranges").
 struct Series: Identifiable {
     var target: String
     var probe: Probe
     var color: Color
-    /// One per bucket with results, oldest first; a point's time is its bucket's start.
+    /// One per bucket with results or Paused, oldest first; a point's time is its bucket's start.
     var points: [GraphPoint]
     /// The graphs' right edge, which moves every refresh; buckets don't.
     var now: Double
     var span: Double
-    /// RAM and storage bucket widths, and where storage hands over to RAM (`c`).
-    var ramWidth: Double, storageWidth: Double, handover: Double
     var id: String { target }
 
-    func width(_ p: GraphPoint) -> Double { p.start < handover ? storageWidth : ramWidth }
     /// A point's time against `now`: negative seconds, sliding left as time passes.
-    func x(_ p: GraphPoint) -> Double { p.start - now }
+    func x(_ p: GraphPoint) -> Double { Double(p.at) - now }
 
     /// Over the whole range, for the legend, in the chosen aggregate.
     var summary: Double?
     var aggregate: Aggregate
     var loss: Double
 
-    /// The span every series of `range` shares, so All lines up across Targets.
-    @MainActor
+    /// The span every series of `range` shares, so All lines up across Targets: from the
+    /// oldest A3 Row to now, at least a day.
     static func span(_ d: Dashboard, range: GraphRange) -> Double {
-        guard range == .all else { return range.fixedSeconds! }
-        let ramOldest = d.results.values.compactMap { $0.first?.at }.min()
-        let oldest = [d.history?.rollups.oldest, ramOldest].compactMap { $0 }.min()
-        return range.span(now: d.now, oldest: oldest)
+        if let span = range.span { return Double(span) }
+        let oldest = d.history?.oldestDay.map(Double.init) ?? d.now
+        return max(86_400, d.now - oldest)
     }
 
-    @MainActor
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
-        let span = span(d, range: range)
-        let rollups = d.history?.rollups
-        let (ramWidth, storageWidth) = HistoryBuckets.widths(span: span)
+        guard let history = d.history else { return [] }
+        let span = span(d, range: range), now = Int(d.now.rounded(.down)), link = d.path.link
         return d.layout.charted.compactMap { entry in
             guard let probe = entry.charted else { return nil }
-            let target = entry.target, link = d.path.link
-            func make() -> HistoryLine? {
-                HistoryLine.make(span: span, now: d.now, aggregate: aggregate, results: d.results[probe],
-                                 rollups: rollups, probe: probe, link: link)
-            }
-            // Under 15 s buckets the line changes every refresh; longer ones merge many Minutes,
-            // so they're computed once a minute.
-            let line = ramWidth >= 15
-                ? d.history?.line(.init(range: range.rawValue, aggregate: aggregate, link: link, probe: probe),
-                                  minute: Int(d.now / 60), make)
-                : make()
-            guard let line else { return nil }
-            return Series(target: target, probe: probe, color: palette.series(entry.slot), points: line.points,
-                          now: d.now, span: span, ramWidth: ramWidth, storageWidth: storageWidth,
-                          handover: rollups?.writtenThrough ?? 0, summary: line.summary,
-                          aggregate: aggregate, loss: line.loss)
+            let source = history.source(HistoryKey(link: link, probe: probe))
+            let points = Graph.points(range, now: now, source: source, aggregate: aggregate)
+            guard points.contains(where: { $0.state != .paused }) else { return nil }
+            let summary = Graph.summary(range, now: now, source: source, aggregate: aggregate)
+            return Series(target: entry.target, probe: probe, color: palette.series(entry.slot), points: points,
+                          now: d.now, span: span, summary: summary.value, aggregate: aggregate, loss: summary.loss)
         }
     }
 }
@@ -154,7 +118,7 @@ private struct LatencyChart: View {
     private let leading: CGFloat = 30, bottom: CGFloat = 18
 
     var body: some View {
-        let yMax = yMax, lines = lines, loss = worstLoss
+        let yMax = yMax, lines = lines, loss = worstLoss, paused = paused
         // About a pixel of movement per frame: 30 fps for 1m, rarely for 7d.
         TimelineView(.animation(minimumInterval: max(1.0 / 30, span / 600), paused: !animate)) { context in
             // Live data is stamped with the clock, so it never runs ahead of the edge.
@@ -167,9 +131,14 @@ private struct LatencyChart: View {
                 let x = { (t: Double) in plot.maxX - CGFloat((edge - t) / span) * plot.width }
                 let y = { (v: Double) in plot.maxY - CGFloat(min(v, yMax) / yMax) * plot.height }
                 // Before the first point there is no data (rules/history.md, "Drawing").
-                if let first = series.compactMap({ $0.points.first?.start }).min(), first > edge - span {
-                    clipped.fill(Path(CGRect(x: plot.minX, y: plot.minY, width: x(first) - plot.minX, height: plot.height)),
+                if let first = series.compactMap({ $0.points.first?.at }).min(), Double(first) > edge - span {
+                    clipped.fill(Path(CGRect(x: plot.minX, y: plot.minY, width: x(Double(first)) - plot.minX, height: plot.height)),
                                  with: .color(palette.cardEdge.opacity(0.35)))
+                }
+                // Paused: not measuring, never loss. A Pause is machine-wide, so every line shares it.
+                for (start, width) in paused {
+                    clipped.fill(Path(CGRect(x: x(start), y: plot.minY, width: max(1, x(start + width) - x(start)), height: plot.height)),
+                                 with: .color(palette.cardEdge.opacity(0.7)))
                 }
                 // Loss along the floor, one tick per bucket at its worst Target's loss.
                 for (start, width, l) in loss {
@@ -178,6 +147,12 @@ private struct LatencyChart: View {
                     clipped.fill(Path(r), with: .color(palette.loss.opacity(0.25 + 0.75 * min(1, l * 2.5))))
                 }
                 for line in lines {
+                    // The provisional edge can still change: drawn hollow.
+                    if let p = line.provisional {
+                        let c = CGPoint(x: x(p.t), y: y(p.v))
+                        clipped.stroke(Path(ellipseIn: CGRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5)),
+                                       with: .color(line.color), lineWidth: 1.5)
+                    }
                     for run in line.runs {
                         if run.count == 1, let p = run.first {
                             let c = CGPoint(x: x(p.t), y: y(p.v))
@@ -199,32 +174,39 @@ private struct LatencyChart: View {
         .accessibilityLabel("Latency over \(label == "All" ? "all history" : "the last \(label)")")
     }
 
-    private struct Line { var color: Color; var runs: [[(t: Double, v: Double)]] }
+    private struct Line { var color: Color; var runs: [[(t: Double, v: Double)]]; var provisional: (t: Double, v: Double)? }
 
-    /// Each series as runs of points at bucket starts (rules/history.md, "Drawing"). A run breaks
-    /// at a bucket with no results, which has no point, and at one whose results were all lost.
+    /// Each series as runs of closed points at bucket starts (rules/history.md, "Drawing"). A run
+    /// breaks at a bucket with no point, a Paused one, and one whose results were all lost.
     private var lines: [Line] {
         series.map { s in
             var runs: [[(t: Double, v: Double)]] = [], run: [(t: Double, v: Double)] = []
-            var end = -Double.infinity
+            var provisional: (t: Double, v: Double)?
+            var end = Int.min
             for p in s.points {
-                if p.start > end || p.value == nil, !run.isEmpty { runs.append(run); run = [] }
-                if let v = p.value { run.append((p.start, v)) }
-                end = p.start + s.width(p)
+                if p.at > end || p.state != .value || p.provisional, !run.isEmpty { runs.append(run); run = [] }
+                end = p.at + p.width
+                guard p.state == .value, let v = p.value else { continue }
+                if p.provisional { provisional = (Double(p.at), v) } else { run.append((Double(p.at), v)) }
             }
             if !run.isEmpty { runs.append(run) }
-            return Line(color: s.color, runs: runs)
+            return Line(color: s.color, runs: runs, provisional: provisional)
         }
     }
 
+    private var paused: [(start: Double, width: Double)] {
+        Set(series.flatMap { $0.points.filter { $0.state == .paused }.map { [$0.at, $0.width] } })
+            .map { (Double($0[0]), Double($0[1])) }
+    }
+
     private var worstLoss: [(start: Double, width: Double, loss: Double)] {
-        var worst: [Double: (width: Double, loss: Double)] = [:]
+        var worst: [Int: (width: Int, loss: Double)] = [:]
         for s in series {
-            for p in s.points where p.loss > 0 {
-                worst[p.start] = (s.width(p), max(worst[p.start]?.loss ?? 0, p.loss))
+            for p in s.points where (p.loss ?? 0) > 0 {
+                worst[p.at] = (p.width, max(worst[p.at]?.loss ?? 0, p.loss!))
             }
         }
-        return worst.map { ($0.key, $0.value.width, $0.value.loss) }
+        return worst.map { (Double($0.key), Double($0.value.width), $0.value.loss) }
     }
 
     /// Room above the busiest line, ignoring its rarest spikes; a round number, so the scale
@@ -233,13 +215,13 @@ private struct LatencyChart: View {
         let values = series.flatMap { $0.points.compactMap(\.value) }.sorted()
         guard !values.isEmpty else { return 50 }
         let p98 = values[Int(Double(values.count - 1) * 0.98)]
-        return GraphBuckets.niceCeiling(max(10, p98 * 1.15))
+        return GraphScale.niceCeiling(max(10, p98 * 1.15))
     }
 
     /// Fixed gridlines: ages are measured back from the edge, so they hold still as data scrolls.
     private func drawGrid(_ ctx: inout GraphicsContext, _ plot: CGRect, yMax: Double) {
         let grid = GraphicsContext.Shading.color(palette.cardEdge)
-        let step = GraphBuckets.niceCeiling(yMax / 4)
+        let step = GraphScale.niceCeiling(yMax / 4)
         var v = 0.0
         while v <= yMax + 0.001 {
             let y = plot.maxY - CGFloat(v / yMax) * plot.height
@@ -409,7 +391,7 @@ private struct TargetCard: View {
     /// spec rules/probe-stats.md, "Readouts": the chosen aggregate of the Probe's window.
     private func readout(_ p: Probe) -> Double? {
         guard let stats = dashboard.stats[p] else { return nil }
-        return Readout.value(dashboard.results[p] ?? [], stats: stats, aggregate: aggregate,
+        return Readout.value(dashboard.window[p] ?? [], stats: stats, aggregate: aggregate, now: dashboard.now,
                              windowSeconds: Double(SpecResources.defaults.history.recentWindowS))
     }
 
@@ -424,9 +406,9 @@ private struct Sparkline: View {
 
     var body: some View {
         let values = series.points.compactMap(\.value)
-        let top = GraphBuckets.niceCeiling(max(values.max() ?? 1, 1) * 1.1)
+        let top = GraphScale.niceCeiling(max(values.max() ?? 1, 1) * 1.1)
         Chart {
-            ForEach(series.points.filter { $0.value != nil }, id: \.start) { p in
+            ForEach(series.points.filter { $0.value != nil }, id: \.at) { p in
                 AreaMark(x: .value("t", series.x(p)), y: .value("ms", p.value!))
                     .foregroundStyle(LinearGradient(colors: [series.color.opacity(0.35), series.color.opacity(0)],
                                                     startPoint: .top, endPoint: .bottom))

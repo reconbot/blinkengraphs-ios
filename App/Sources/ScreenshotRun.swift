@@ -66,7 +66,7 @@ final class ScreenshotRun {
         try? fm.removeItem(at: dir)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         for shot in Self.shots {
-            // The range is read through @AppStorage, and Demo makes Rollups only for a long one.
+            // The range is read through @AppStorage, and Demo seeds Archives only for a long one.
             UserDefaults.standard.set(shot.range.rawValue, forKey: "range")
             dashboard = shot.demo.dashboard()
             current = shot
