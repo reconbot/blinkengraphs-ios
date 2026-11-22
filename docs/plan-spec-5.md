@@ -2,15 +2,17 @@
 
 Issue #31. Spec plan: [`docs/history-redesign.md`, iOS](https://github.com/reconbot/blinkengraphs/blob/v5.0.0/docs/history-redesign.md#ios); decision: spec ADR 0001. Reviewed at `066eb9c`, which pins spec v3.0.0.
 
-## What's in flight
+## Status
 
-| Item | State |
-|---|---|
-| #31 Adopt spec 5.0.0 | Open. This plan |
-| #29 release 2.1.0 | Open release PR; merges only on the owner's word |
-| #24 Adopt spec 2.0.0 | Open, but #25 and #27 shipped it. Close it as completed |
-| Spec 4.0.0 | Whole-ms RTTs and per-version Public Address URLs are in. **Not in:** a tie for worst Internet Probe goes to the *first* in Probe Group order; `Verdict.swift:161-162` and ADR 0001 still pick the last |
-| Windows, macOS | Implement after iOS (spec plan order). Windows has an open release PR (#39) |
+| PR | What | State |
+|---|---|---|
+| #34 | This plan, research, ADR 0014 | merged |
+| #35 | Core on spec 5.2.0: Raw, Archives, Pauses, stats from now (ADR 0015) | merged; released in 3.0.0 |
+| #37 | History on disk (ADR 0016) | merged |
+| #38 | Every active Link measured (ADR 0017) | merged |
+| #40 | Networks card, one-Link chart, Compare | merged |
+
+Left for #31's "done when", each needing a device: the settle time, the Raw write cadence and its cost, and the binding tests (`docs/device-tests.md`). Also left: Hop Traces on Links besides the default route, and the graph-rendering prototype (the Canvas chart stays until it shows a reason to move).
 
 ## Domain model
 
@@ -100,15 +102,7 @@ PR 1 is large because the vectors change together; landing it first keeps every 
 
 ## Device tests
 
-Done on a device, results into `docs/research/`:
-
-- Settle time: first-reply time after `.active` on Wi-Fi, cellular and VPN. Instrument a debug build to log, per Probe, time from `.active` to first reply.
-- Raw write cadence: MetricKit `MXDiskIOMetric` over a 1 h session; the model predicts about 6 MB an hour at 5 s.
-- Launch time with a full 2 h of Raw.
-- Binding, VPN, cellular switch and Private Relay: the nine tests in [multi-link-probing](research/multi-link-probing.md#for-this-app).
-- Lifecycle event order for Home, app switcher, lock and a call; the Pause write under lock ([lifecycle-and-storage](research/lifecycle-and-storage.md#for-this-app)).
-- Graph frame cost for the prototype on a ProMotion and a 60 Hz iPhone.
-- Kill: force-quit and jetsam (Xcode memory warning loop), then relaunch; the gap reads Paused.
+In `docs/device-tests.md`.
 
 ## Open questions for the owner
 
