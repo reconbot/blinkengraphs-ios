@@ -23,7 +23,7 @@ struct Series: Identifiable {
     var color: Color
     /// The legend's name: the Target, or in Compare the Target and its Link ("1.1.1.1 · Wi-Fi").
     var label: String
-    var link: Link
+    var link: BlinkengraphsCore.Link
     /// One per bucket with results or Paused, oldest first; a point's time is its bucket's start.
     var points: [GraphPoint]
     /// The graphs' right edge, which moves every refresh; buckets don't.
@@ -50,10 +50,10 @@ struct Series: Identifiable {
     /// One line per Target on `link` (the default-route Link when nil); with `compare`, the
     /// first Internet Target on every measured Link instead, one color per Link (ADR 0014).
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate,
-                    link: Link? = nil, compare: Bool = false) -> [Series] {
+                    link: BlinkengraphsCore.Link? = nil, compare: Bool = false) -> [Series] {
         guard let history = d.history else { return [] }
         let span = span(d, range: range), now = Int(d.now.rounded(.down))
-        func line(_ probe: Probe, _ target: String, on link: Link, color: Color, label: String) -> Series? {
+        func line(_ probe: Probe, _ target: String, on link: BlinkengraphsCore.Link, color: Color, label: String) -> Series? {
             let source = history.source(HistoryKey(link: link, probe: probe))
             let points = Graph.points(range, now: now, source: source, aggregate: aggregate)
             guard points.contains(where: { $0.state != .paused }) else { return nil }
@@ -93,7 +93,7 @@ struct LatencyCard: View {
     /// Off while scrolling: the chart holds still under the finger.
     let animate: Bool
     /// The Link charted when not comparing.
-    var link: Link? = nil
+    var link: BlinkengraphsCore.Link? = nil
     var compare: Binding<Bool>? = nil
     @State private var hidden: Set<String> = []
     @Environment(\.palette) private var palette
@@ -551,9 +551,9 @@ struct HopTraceCard: View {
 /// Tapping one charts it; cellular while on Wi-Fi waits for the switch below (ADR 0017).
 struct NetworksCard: View {
     let dashboard: Dashboard
-    let selected: Link
+    let selected: BlinkengraphsCore.Link
     let compare: Bool
-    let select: (Link) -> Void
+    let select: (BlinkengraphsCore.Link) -> Void
     @AppStorage(Monitor.measureCellularKey) private var measureCellular = false
     @State private var nudge = false
     @Environment(\.palette) private var palette

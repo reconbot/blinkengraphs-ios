@@ -15,7 +15,7 @@ struct DashboardView: View {
     /// made scrolling jitter, so updates wait until the scroll ends.
     @State private var frozen: Dashboard?
     /// The Link the chart shows; nil follows the default route.
-    @State private var chartLink: Link?
+    @State private var chartLink: BlinkengraphsCore.Link?
     /// The chart shows the first Internet Target on every Link instead (ADR 0014).
     @State private var compare = false
 
