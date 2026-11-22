@@ -1,5 +1,6 @@
 import BlinkengraphsCore
 import SwiftUI
+import UIKit
 
 struct VerdictView: View {
     let findings: [Finding]
@@ -52,7 +53,41 @@ struct VerdictView: View {
                 }
             }
             .navigationTitle("blinkengraphs")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Copy report", systemImage: "doc.on.doc") { UIPasteboard.general.string = report(redact: false) }
+                        Button("Copy redacted report", systemImage: "eye.slash") { UIPasteboard.general.string = report(redact: true) }
+                        ShareLink(item: report(redact: false)) { Label("Share report", systemImage: "square.and.arrow.up") }
+                    } label: {
+                        Label("Report", systemImage: "doc.text")
+                    }
+                }
+            }
         }
+    }
+
+    /// A plain-text snapshot for pasting into a bug report; redacted hides public addresses and names.
+    private func report(redact: Bool) -> String {
+        let info = Bundle.main.infoDictionary
+        let app = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+        var connection: [(String, String)] = [
+            ("Path", path.satisfied ? "Up" : "Down"),
+            ("Via", [path.interfaces.first, path.radio].compactMap { $0 }.joined(separator: " · ")),
+            ("Supports", [path.ipv4 ? "IPv4" : nil, path.ipv6 ? "IPv6" : nil, path.dns ? "DNS" : nil]
+                .compactMap { $0 }.joined(separator: ", ")),
+            ("Gateway", path.gateway ?? "—"),
+        ]
+        if let q = path.linkQuality { connection.append(("Link quality", q)) }
+        if path.expensive { connection.append(("Expensive", "yes")) }
+        if path.constrained { connection.append(("Low Data Mode", "yes")) }
+        return Report.text(ReportInput(
+            generatedAt: .now,
+            header: ["app \(app)", "spec \(SpecResources.specVersion)",
+                     "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"],
+            verdict: findings, connection: connection, probes: probes, denied: denied,
+            hops: hops, names: hopNames, targets: SpecResources.targetAddresses
+        ), redact: redact)
     }
 
     @ViewBuilder private func probeValue(_ p: Probe) -> some View {

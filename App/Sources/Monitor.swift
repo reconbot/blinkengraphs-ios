@@ -143,6 +143,10 @@ final class Monitor {
 
     private func sweepOnce(_ target: String) async {
         guard path.satisfied, let addr = address(of: target) else { return }
+        // spec rules/hop-trace.md: only over an IP version the path carries natively; through
+        // 464XLAT the routers before the translator can't answer.
+        let v6 = Probe(target: target, protocol: "").isIPv6 == true
+        guard v6 ? path.ipv6 : path.ipv4 else { return }
         let link = path.link
         let cfg = defaults.hopTrace
         var plan = sweepPlans[link]?[target] ?? HopSweepPlan(maxTtl: cfg.maxTtl, fullSweepEveryS: Double(cfg.fullSweepEveryS))
