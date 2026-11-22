@@ -147,6 +147,12 @@ enum Sockets {
         return Address.name(of: storage)
     }
 
+    /// `host`'s address, IPv6 first when `preferV6`, else IPv4 first. Blocks on the system resolver.
+    static func resolve(_ host: String, preferV6: Bool) -> String? {
+        let v6 = resolve(host, v6: true), v4 = resolve(host, v6: false)
+        return preferV6 ? (v6 ?? v4) : (v4 ?? v6)
+    }
+
     /// The PTR name for `ip`, or nil when it has none. Blocks on the system resolver.
     static func reverseDNS(_ ip: String) -> String? {
         guard var a = Address(ip, port: 0) else { return nil }

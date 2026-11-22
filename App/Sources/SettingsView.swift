@@ -72,6 +72,10 @@ struct SettingsView: View {
                 } footer: {
                     Text("The latency on each Target card, over its last \(SpecResources.defaults.history.recentWindowS) seconds. The Verdict always uses the median.")
                 }
+                Section {
+                    NavigationLink("Targets") { TargetsView() }
+                }
+                .listRowBackground(palette.card)
                 Section("About") {
                     LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
                     LabeledContent("Spec", value: SpecResources.specVersion)

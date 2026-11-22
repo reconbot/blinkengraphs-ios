@@ -28,8 +28,8 @@ struct DashboardView: View {
                     LatencyCard(dashboard: dashboard, series: series, range: $range, animate: frozen == nil)
                     TargetGrid(dashboard: dashboard, series: series)
                     PublicAddressCard(readings: dashboard.publicAddress)
-                    ForEach(dashboard.hops.keys.sorted(by: Self.ipv4First), id: \.self) { target in
-                        HopTraceCard(target: target, rows: dashboard.hops[target] ?? [], names: dashboard.hopNames)
+                    ForEach(dashboard.layout.traced.filter { dashboard.hops[$0.target] != nil }) { entry in
+                        HopTraceCard(target: entry.target, rows: dashboard.hops[entry.target] ?? [], names: dashboard.hopNames)
                     }
                     Footer()
                 }
@@ -55,10 +55,6 @@ struct DashboardView: View {
         }
         .tint(palette.color("color.section.network"))
         .sensoryFeedback(trigger: worst) { old, new in new < old ? .warning : nil }
-    }
-
-    private static func ipv4First(_ a: String, _ b: String) -> Bool {
-        (a.contains(":") ? 1 : 0, a) < (b.contains(":") ? 1 : 0, b)
     }
 
     private var reportMenu: some View {
@@ -91,7 +87,7 @@ struct DashboardView: View {
             header: ["app \(app)", "spec \(SpecResources.specVersion)",
                      "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"],
             verdict: dashboard.findings, connection: connection, probes: dashboard.stats, denied: dashboard.denied,
-            hops: dashboard.hops, names: dashboard.hopNames, targets: SpecResources.targetAddresses
+            hops: dashboard.hops, names: dashboard.hopNames, targets: dashboard.layout.targets
         ), redact: redact)
     }
 }
@@ -352,14 +348,6 @@ private struct Footer: View {
     }
 }
 
-/// Display name for a Target.
-func targetName(_ target: String) -> String {
-    switch target {
-    case Probe.gateway: "Gateway"
-    case Probe.systemDNS: "System DNS"
-    default: target
-    }
-}
 
 func ms(_ v: Double?) -> String {
     guard let v else { return "—" }

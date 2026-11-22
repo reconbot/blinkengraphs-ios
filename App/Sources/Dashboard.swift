@@ -15,6 +15,8 @@ struct Dashboard: Sendable {
     var now: Double = Date().timeIntervalSince1970
     /// Rollups for the longer graphs; nil before any exist.
     var history: RollupHistory?
+    /// The Probe Group as shown: names, order, charted Probes, colour slots.
+    var layout = TargetLayout(SpecResources.defaults.probeGroup)
     var captivePortal = false
     var publicAddress: [IPFamily: PublicAddressReading] = [:]
 }

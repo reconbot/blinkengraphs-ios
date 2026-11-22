@@ -35,10 +35,22 @@ public struct Measurements: Sendable {
     private var denied: Set<Probe> = []
     private var captivePortal = false
     private var publicAddress: [IPFamily: PublicAddressReading] = [:]
+    /// The Probe Group's Probes and traced Targets; history for anything else stays out of the snapshot.
+    private var probes: Set<Probe>
+    private var traced: Set<String>
 
     public init(defaults: Defaults) {
+        probes = Set(defaults.probeGroup.probes)
+        traced = Set(defaults.probeGroup.targets.filter(\.trace).map(\.target))
         self.defaults = defaults
         histories = LinkHistories(ramSeconds: Double(defaults.history.ramMinutes * 60))
+    }
+
+    /// After the user edits the Probe Group. History of removed Probes is kept but not shown.
+    public mutating func setProbeGroup(_ group: Defaults.ProbeGroup) {
+        probes = Set(group.probes)
+        traced = Set(group.targets.filter(\.trace).map(\.target))
+        denied.formIntersection(probes)
     }
 
     /// Returns whether the Link changed.
@@ -102,11 +114,13 @@ public struct Measurements: Sendable {
 
     public func snapshot() -> Snapshot {
         let stats = histories.stats(on: link, windowSeconds: Double(defaults.history.recentWindowS))
+            .filter { probes.contains($0.key) }
         let findings = Verdict.evaluate(VerdictInput(
             probes: stats.map { .init(probe: $0.key, stat: $0.value) },
             pathUp: pathUp, viaVPN: viaVPN, captivePortal: captivePortal))
         return Snapshot(findings: findings, stats: stats, denied: denied,
-                        hops: (traces[link] ?? [:]).mapValues(\.table), results: histories.results(on: link),
+                        hops: (traces[link] ?? [:]).filter { traced.contains($0.key) }.mapValues(\.table),
+                        results: histories.results(on: link).filter { probes.contains($0.key) },
                         captivePortal: captivePortal, publicAddress: publicAddress)
     }
 }

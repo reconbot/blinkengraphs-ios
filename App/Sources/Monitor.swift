@@ -13,11 +13,13 @@ final class Monitor {
     /// Hop names by address, from reverse DNS (spec rules/hop-trace.md, "Names").
     private(set) var hopNames: [String: String] = [:]
     private(set) var now = Date().timeIntervalSince1970
+    private(set) var layout: TargetLayout
 
     var dashboard: Dashboard {
         Dashboard(findings: snapshot.findings, stats: snapshot.stats, denied: snapshot.denied, path: path,
                   hops: snapshot.hops, hopNames: hopNames, results: snapshot.results, now: now,
-                  history: history, captivePortal: snapshot.captivePortal, publicAddress: snapshot.publicAddress)
+                  history: history, layout: layout, captivePortal: snapshot.captivePortal,
+                  publicAddress: snapshot.publicAddress)
     }
 
     /// Minutes older than the RAM History, for the 1h, 24h and 7d graphs.
@@ -27,13 +29,20 @@ final class Monitor {
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var namesRequested: Set<String> = []
     @ObservationIgnored private let defaults: Defaults
+    /// The user's Probe Group (Settings → Targets), else the spec's.
+    @ObservationIgnored private var group: Defaults.ProbeGroup
+    /// Name Targets resolved, and when; looked up again after 30 s (CONTEXT.md "Target").
+    @ObservationIgnored private var resolved: [String: (address: String?, at: Double)] = [:]
     @ObservationIgnored private let runners: [any ProbeRunner]
     @ObservationIgnored private var pathWatcher: PathWatcher?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
 
-    init(defaults: Defaults) {
+    init(defaults: Defaults, group: Defaults.ProbeGroup) {
         self.defaults = defaults
+        self.group = group
+        layout = TargetLayout(group)
         measurements = Measurements(defaults: defaults)
+        measurements.setProbeGroup(group)
         snapshot = measurements.snapshot()
         history = RollupHistory(keepDays: defaults.history.rollupDays)
         files = RollupFiles(keepDays: defaults.history.rollupDays)
@@ -53,13 +62,26 @@ final class Monitor {
         watcher.start { [weak self] state in Task { @MainActor in self?.apply(state) } }
         pathWatcher = watcher
 
-        let group = defaults.probeGroup
+        let group = self.group
         repeating(every: .milliseconds(group.latencyMs)) { await $0.probeOnce() }
         repeating(every: .seconds(60)) { await $0.checkCaptivePortal() }
         repeating(every: .seconds(defaults.publicAddress.refreshS)) { await $0.lookUpPublicAddress() }
         for target in group.targets where target.trace {
             repeating(every: .milliseconds(group.traceMs)) { await $0.sweepOnce(target.target) }
         }
+    }
+
+    /// After the user edits the Targets: measure the new group from the next round.
+    func setProbeGroup(_ group: Defaults.ProbeGroup) {
+        guard group != self.group else { return }
+        self.group = group
+        layout = TargetLayout(group)
+        measurements.setProbeGroup(group)
+        if !tasks.isEmpty {
+            stop()
+            start()
+        }
+        publish()
     }
 
     func stop() {
@@ -97,18 +119,38 @@ final class Monitor {
         // The OS resolver needs no address (SystemDNSProbeRunner).
         case Probe.systemDNS: return "system"
         default:
-            let v6 = Probe(target: target, protocol: "").isIPv6 == true
-            return (v6 ? path.ipv6 : path.ipv4 || path.ipv6) ? target : nil
+            // A name Target goes to the address it resolved to; unresolved, it's skipped.
+            let literal = Probe(target: target, protocol: "").isIPv6 != nil
+            guard let address = literal ? target : resolved[target]?.address else { return nil }
+            let v6 = address.contains(":")
+            return (v6 ? path.ipv6 : path.ipv4 || path.ipv6) ? address : nil
+        }
+    }
+
+    /// Resolves name Targets that are new or older than 30 s, preferring IPv6 when the path has it.
+    private func refreshNames() async {
+        let nowS = Date().timeIntervalSince1970, preferV6 = path.ipv6
+        let due = group.targets.map(\.target).filter { t in
+            t != Probe.gateway && t != Probe.systemDNS && Probe(target: t, protocol: "").isIPv6 == nil
+                && nowS - (resolved[t]?.at ?? -.infinity) >= 30
+        }
+        guard !due.isEmpty else { return }
+        await withTaskGroup(of: (String, String?).self) { lookups in
+            for name in due {
+                lookups.addTask { (name, await offPool { Sockets.resolve(name, preferV6: preferV6) }) }
+            }
+            for await (name, address) in lookups { resolved[name] = (address, nowS) }
         }
     }
 
     private func probeOnce() async {
         // spec rules/probe-stats.md: no network path, no Probes; the Verdict says Offline.
         guard path.satisfied else { return publish() }
+        await refreshNames()
         // Results belong to the Link they were sent on, even if the path changes mid-flight.
         let link = path.link
-        let timeout = timeout(intervalMs: defaults.probeGroup.latencyMs)
-        let jobs = defaults.probeGroup.probes.compactMap { probe in
+        let timeout = timeout(intervalMs: group.latencyMs)
+        let jobs = group.probes.compactMap { probe in
             address(of: probe.target).flatMap { addr in
                 runners.first { $0.handles(probe) }.map { (probe, addr, $0) }
             }
@@ -172,11 +214,11 @@ final class Monitor {
         guard path.satisfied, let addr = address(of: target) else { return }
         // spec rules/hop-trace.md: only over an IP version the path carries natively; through
         // 464XLAT the routers before the translator can't answer.
-        let v6 = Probe(target: target, protocol: "").isIPv6 == true
+        let v6 = addr.contains(":")
         guard v6 ? path.ipv6 : path.ipv4 else { return }
         let link = path.link
         let ttls = measurements.sweepTTLs(target, at: Date().timeIntervalSince1970)
-        let timeout = timeout(intervalMs: defaults.probeGroup.traceMs)
+        let timeout = timeout(intervalMs: group.traceMs)
         // A sweep whose sends find no route records nothing: the path can't reach this IP version.
         let results = await withTaskGroup(of: HopResult?.self) { group in
             for ttl in ttls {

@@ -33,7 +33,7 @@ enum GraphRange: String, CaseIterable, Identifiable {
 
 }
 
-/// One Target's line: its ICMP Probe, else its first Probe.
+/// One Target's line, of its charted Probe (TargetLayout).
 struct Series: Identifiable {
     var target: String
     var probe: Probe
@@ -54,11 +54,11 @@ struct Series: Identifiable {
 
     @MainActor
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
-        let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
         let ram = Double(SpecResources.defaults.history.ramMinutes * 60)
         let rollups = range.usesRollups ? d.history?.rollups : nil
-        return targets.enumerated().compactMap { i, target in
-            let probe = Probe(target: target, protocol: "icmp"), link = d.path.link
+        return d.layout.charted.compactMap { entry in
+            guard let probe = entry.charted else { return nil }
+            let target = entry.target, link = d.path.link
             func make() -> HistoryLine? {
                 HistoryLine.make(span: range.seconds, buckets: range.buckets, now: d.now, aggregate: aggregate,
                                  ramSeconds: ram, results: d.results[probe], rollups: rollups,
@@ -69,7 +69,7 @@ struct Series: Identifiable {
                                   minute: Int(d.now / 60), make)
                 : make()
             guard let line else { return nil }
-            return Series(target: target, probe: probe, color: palette.series(i), points: line.points,
+            return Series(target: target, probe: probe, color: palette.series(entry.slot), points: line.points,
                           now: d.now, range: range, summary: line.summary, aggregate: aggregate, loss: line.loss)
         }
     }
@@ -250,7 +250,7 @@ private struct LegendRow: View {
             Circle().fill(hidden ? Color.clear : series.color)
                 .overlay(Circle().strokeBorder(series.color, lineWidth: 1.5))
                 .frame(width: 9, height: 9)
-            Text(targetName(series.target))
+            Text(TargetLayout.name(series.target))
                 .foregroundStyle(hidden ? palette.textWeak : palette.text)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 6)
@@ -296,11 +296,10 @@ struct TargetGrid: View {
 
     var body: some View {
         let byTarget = Dictionary(grouping: Set(dashboard.stats.keys).union(dashboard.denied), by: \.target)
-        let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { byTarget[$0] != nil }
+        let entries = dashboard.layout.entries.filter { byTarget[$0.target] != nil }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {
-            ForEach(targets, id: \.self) { target in
-                TargetCard(target: target, probes: byTarget[target] ?? [], dashboard: dashboard,
-                           series: series.first { $0.target == target })
+            ForEach(entries) { entry in
+                TargetCard(entry: entry, dashboard: dashboard, series: series.first { $0.target == entry.target })
             }
         }
     }
@@ -308,18 +307,19 @@ struct TargetGrid: View {
 
 private struct TargetCard: View {
     @AppStorage(Aggregate.readoutStorageKey) private var aggregate = SpecResources.defaults.readoutAggregate
-    let target: String
-    let probes: [Probe]
+    let entry: TargetLayout.Entry
     let dashboard: Dashboard
     let series: Series?
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let sorted = probes.sorted { order($0) < order($1) }
+        let target = entry.target
+        // Probes that have reported, in the layout's order.
+        let sorted = entry.probes.filter { dashboard.stats[$0] != nil || dashboard.denied.contains($0) }
         let lead = sorted.first.flatMap { dashboard.stats[$0] }
         let leadValue = sorted.first.flatMap(readout)
-        let accent = series?.color ?? palette.color("color.section.cpu")
-        Card(title: targetName(target), accent: accent) {
+        let accent = series?.color ?? palette.series(entry.slot)
+        Card(title: entry.name, accent: accent) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(ms(leadValue))
                     .font(.system(size: 30, weight: .semibold, design: .rounded))
@@ -373,10 +373,6 @@ private struct TargetCard: View {
         guard let stats = dashboard.stats[p] else { return nil }
         return Readout.value(dashboard.results[p] ?? [], stats: stats, aggregate: aggregate,
                              windowSeconds: Double(SpecResources.defaults.history.recentWindowS))
-    }
-
-    private func order(_ p: Probe) -> Int {
-        p.protocol == "icmp" ? 0 : p.protocol.hasPrefix("tcp") ? 1 : p.protocol.hasPrefix("udp") ? 2 : 3
     }
 
     private func label(_ p: Probe) -> String {
