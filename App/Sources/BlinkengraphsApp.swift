@@ -22,8 +22,7 @@ struct BlinkengraphsApp: App {
                 // The run lives on the container: the view inside is replaced for every shot.
                 ZStack {
                     // A fresh view per shot, so its scroll anchor and range apply from the start.
-                    DashboardView(dashboard: shots.dashboard, anchorBottom: shots.current?.bottom ?? false)
-                        .id(shots.current?.name)
+                    ShotView(run: shots).id(shots.current?.name)
                 }
                 .task { await shots.run() }
             } else {

@@ -99,7 +99,13 @@ jobs:
           for name, caption in [("range-1h-isp-loss-dark", "1h, ISP loss"), ("range-24h-isp-loss-dark", "24h, ISP loss"),
                                 ("range-7d-wifi-light", "7d, Wi-Fi")]:
               out.append(f'<td align="center"><img src="{name}.png" width="180"><br><sub>{caption}</sub></td>')
-          out += ["</tr></table>", "", '<img src="app-icon.png" width="96" alt="App icon">']
+          out += ["</tr></table>", "", "<table>",
+                  "<tr><th></th>" + "".join(f"<th>{look}</th>" for look in ("dark", "light")) + "</tr>"]
+          for name, caption in [("settings", "Settings"), ("targets", "Targets"),
+                                ("target-edit", "Edit Target"), ("target-new", "New Target, presets")]:
+              cells = "".join(f'<td><img src="{name}-{look}.png" width="180"></td>' for look in ("dark", "light"))
+              out.append(f"<tr><th>{caption}</th>{cells}</tr>")
+          out += ["</table>", "", '<img src="app-icon.png" width="96" alt="App icon">']
           print("\n".join(out))
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

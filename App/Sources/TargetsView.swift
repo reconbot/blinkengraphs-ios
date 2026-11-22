@@ -95,7 +95,7 @@ private struct TargetRowLabel: View {
     }
 }
 
-private struct TargetEditor: View {
+struct TargetEditor: View {
     @State var row: Defaults.Target
     let save: (Defaults.Target) -> Void
     @State private var tcp = ""

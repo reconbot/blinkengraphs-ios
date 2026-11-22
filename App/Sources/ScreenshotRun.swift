@@ -1,3 +1,4 @@
+import BlinkengraphsCore
 import SwiftUI
 import UIKit
 
@@ -8,18 +9,24 @@ import UIKit
 /// it's not in these images.
 @MainActor @Observable
 final class ScreenshotRun {
+    enum Screen {
+        case dashboard, settings, targets
+        case editor(Defaults.Target)
+    }
+
     struct Shot {
         var name: String
         var demo: Demo
         var dark: Bool
         var bottom: Bool
         var range: GraphRange
+        var screen = Screen.dashboard
     }
 
     static var requested: Bool { UserDefaults.standard.bool(forKey: "capture") }
 
     /// The order and names the workflow's index expects: scenarios in dark then light, top then
-    /// bottom, then the longer ranges.
+    /// bottom, then the longer ranges, then Settings and its Targets screens in dark then light.
     static let shots: [Shot] = {
         let scenarios: [Demo] = [.ispLoss, .wifi, .cellular, .vpn, .offline, .captive]
         var out: [Shot] = []
@@ -34,6 +41,18 @@ final class ScreenshotRun {
         out.append(Shot(name: "range-1h-isp-loss-dark", demo: .ispLoss, dark: true, bottom: false, range: .oneHour))
         out.append(Shot(name: "range-24h-isp-loss-dark", demo: .ispLoss, dark: true, bottom: false, range: .oneDay))
         out.append(Shot(name: "range-7d-wifi-light", demo: .wifi, dark: false, bottom: false, range: .sevenDays))
+        // An edited Target with every Probe on, and a new one typed as "gate" so the presets show.
+        let screens: [(String, Screen)] = [
+            ("settings", .settings), ("targets", .targets),
+            ("target-edit", .editor(Defaults.Target(target: "1.1.1.1", icmp: true, dns: true, trace: true, tcp: 443, udp: nil))),
+            ("target-new", .editor(Defaults.Target(target: "gate", icmp: true, dns: false, trace: false, tcp: nil, udp: nil))),
+        ]
+        for dark in [true, false] {
+            for (name, screen) in screens {
+                out.append(Shot(name: "\(name)-\(dark ? "dark" : "light")", demo: .wifi, dark: dark, bottom: false,
+                                range: .fifteenMinutes, screen: screen))
+            }
+        }
         return out
     }()
 
@@ -67,6 +86,21 @@ final class ScreenshotRun {
         guard let window else { return nil }
         return UIGraphicsImageRenderer(bounds: window.bounds).pngData { _ in
             _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+    }
+}
+
+/// The screen a shot shows. Settings screens are drawn as the window's root, not as sheets, so a
+/// shot needs no presentation to settle.
+struct ShotView: View {
+    let run: ScreenshotRun
+
+    var body: some View {
+        switch run.current?.screen ?? .dashboard {
+        case .dashboard: DashboardView(dashboard: run.dashboard, anchorBottom: run.current?.bottom ?? false)
+        case .settings: SettingsView()
+        case .targets: NavigationStack { TargetsView() }
+        case .editor(let row): TargetEditor(row: row) { _ in }
         }
     }
 }
