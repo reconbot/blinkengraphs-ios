@@ -48,7 +48,7 @@ App target:
 - `Lifecycle`: start a background task at `.inactive`; at `.background` stop Rounds, append the Pause-begin record, end the task. A suspended app that iOS reclaims runs no code, so the kill Pause is the only record of it. Launch reads the newest record first, measures, and loads the rest off the main actor; then `ArchiveWriter` catches up, then prune.
 - `LinkWatcher`: `NWPathMonitor(requiredInterfaceType:)` for `.wifi`, `.cellular` and `.other`, each giving its Link's Gateway, IP versions and `NWInterface.index`; the untyped monitor names the default route.
 - Runners bind with `IP_BOUND_IF`/`IPV6_BOUND_IF`, not `NWParameters.requiredInterface`: the Probes are BSD sockets. System DNS passes the interface index to `DNSServiceGetAddrInfo`. `EHOSTUNREACH` on a bound socket is ambiguous, so `denied` comes from monitor and `CTCellularData` state, not the errno. ([multi-link-probing](research/multi-link-probing.md))
-- Settings: "Measure cellular while on Wi-Fi", off by default, with the measured data cost.
+- "Measure cellular while on Wi-Fi": a switch in the Networks card and in Settings, off by default, labelled with the measured data cost. Tapping the unmeasured cellular row points at the switch; it never turns cellular on by itself.
 - Graphs: rebuilt on `GraphReader`. Keep the clock-driven model (one edge time; closed points fixed). Prototype Swift Charts vectorized plots (iOS 18) against a Canvas that reuses closed lines, 6 Targets × 3 Links × 300 points, measured with the Animation Hitches template; record the pick in an ADR. Honour Reduce Motion. No third-party library. ([graph-rendering](research/graph-rendering.md))
 
 ## Invariants worth a test
