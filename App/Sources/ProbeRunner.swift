@@ -1,4 +1,5 @@
 import BlinkengraphsCore
+import Darwin
 import Foundation
 import Network
 
@@ -11,20 +12,61 @@ enum ProbeOutcome: Sendable {
 
 protocol ProbeRunner: Sendable {
     func handles(_ probe: Probe) -> Bool
-    func run(_ probe: Probe, timeout: Duration) async -> ProbeOutcome
+    /// `address` is the Target resolved to an IPv4 address (the Gateway's, for `gateway`).
+    func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome
 }
 
-/// TCP handshake time via Network.framework. ICMP, DNS and the Gateway come next.
-struct TCPProbeRunner: ProbeRunner {
-    func handles(_ probe: Probe) -> Bool {
-        probe.protocol.hasPrefix("tcp:") && probe.target != Probe.gateway && probe.target != Probe.systemDNS
+/// Runs blocking socket work off the cooperative pool, which must not block.
+func offPool<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+    await withCheckedContinuation { cont in
+        DispatchQueue.global(qos: .utility).async { cont.resume(returning: work()) }
+    }
+}
+
+struct ICMPProbeRunner: ProbeRunner {
+    func handles(_ probe: Probe) -> Bool { probe.protocol == "icmp" }
+
+    func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome {
+        switch await offPool({ Sockets.echo(to: address, timeout: timeout) }) {
+        case .reply(_, .echoReply, let ms): return .reply(ms: ms)
+        case .reply, .timeout: return .lost
+        case .sendFailed(let e): return Self.deniedOrLost(probe, errno: e)
+        }
     }
 
-    func run(_ probe: Probe, timeout: Duration) async -> ProbeOutcome {
+    /// Assumption, to confirm on a device: Local Network Privacy fails the send to a LAN address
+    /// with EHOSTUNREACH or EPERM. Only the Gateway is on the LAN, so only it can be denied.
+    static func deniedOrLost(_ probe: Probe, errno e: Int32) -> ProbeOutcome {
+        probe.target == Probe.gateway && (e == EHOSTUNREACH || e == EPERM) ? .denied : .lost
+    }
+}
+
+/// DNS Probes to a named server. The `system-dns` Target needs the system resolver's address,
+/// which this runner doesn't know yet.
+struct DNSProbeRunner: ProbeRunner {
+    let queryName: String
+
+    func handles(_ probe: Probe) -> Bool { probe.protocol == "dns" && probe.target != Probe.systemDNS }
+
+    func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome {
+        let name = queryName
+        switch await offPool({ Sockets.dnsQuery(name, server: address, timeout: timeout) }) {
+        case .answer(let ms): return .reply(ms: ms)
+        case .timeout: return .lost
+        case .sendFailed(let e): return ICMPProbeRunner.deniedOrLost(probe, errno: e)
+        }
+    }
+}
+
+/// TCP handshake time via Network.framework.
+struct TCPProbeRunner: ProbeRunner {
+    func handles(_ probe: Probe) -> Bool { probe.protocol.hasPrefix("tcp:") }
+
+    func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome {
         guard let port = NWEndpoint.Port(String(probe.protocol.dropFirst(4))) else { return .lost }
         let params = NWParameters.tcp
         params.preferNoProxies = true
-        let conn = NWConnection(host: NWEndpoint.Host(probe.target), port: port, using: params)
+        let conn = NWConnection(host: NWEndpoint.Host(address), port: port, using: params)
         let start = ContinuousClock.now
         let once = Once()
 
@@ -37,8 +79,7 @@ struct TCPProbeRunner: ProbeRunner {
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    let d = ContinuousClock.now - start
-                    finish(.reply(ms: Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15))
+                    finish(.reply(ms: (ContinuousClock.now - start).milliseconds))
                 case .waiting, .failed:
                     finish(conn.currentPath?.unsatisfiedReason == .localNetworkDenied ? .denied : .lost)
                 default: break
