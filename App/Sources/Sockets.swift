@@ -186,9 +186,10 @@ struct Address: Equatable {
     /// The address's text form, IPv4 or IPv6.
     static func name(of s: sockaddr_storage) -> String {
         var s = s
+        let v6 = Int32(s.ss_family) == AF_INET6
         var text = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
         withUnsafePointer(to: &s) { p in
-            if Int32(s.ss_family) == AF_INET6 {
+            if v6 {
                 p.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { a in
                     var addr = a.pointee.sin6_addr
                     _ = inet_ntop(AF_INET6, &addr, &text, socklen_t(text.count))
