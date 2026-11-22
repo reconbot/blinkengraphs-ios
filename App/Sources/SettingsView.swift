@@ -70,7 +70,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Numbers show")
                 } footer: {
-                    Text("The latency on each Target card, over its last 30 seconds. The Verdict always uses the median.")
+                    Text("The latency on each Target card, over its last \(SpecResources.defaults.history.recentWindowS) seconds. The Verdict always uses the median.")
                 }
                 Section("About") {
                     LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
