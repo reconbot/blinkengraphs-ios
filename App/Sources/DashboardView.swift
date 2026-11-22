@@ -4,6 +4,8 @@ import UIKit
 
 struct DashboardView: View {
     let dashboard: Dashboard
+    /// `-anchor bottom` opens scrolled to the end, so screenshots can reach the Hop Traces.
+    var anchorBottom = UserDefaults.standard.string(forKey: "anchor") == "bottom"
     @Environment(\.palette) private var palette
     /// Remembered; also settable at launch (`-range 24h`) for screenshots.
     @AppStorage("range") private var range: GraphRange = .fifteenMinutes
@@ -37,7 +39,7 @@ struct DashboardView: View {
                 .padding(.bottom, 24)
             }
             // `-anchor bottom` opens scrolled to the end, so screenshots can reach the Hop Traces.
-            .defaultScrollAnchor(UserDefaults.standard.string(forKey: "anchor") == "bottom" ? .bottom : .top)
+            .defaultScrollAnchor(anchorBottom ? .bottom : .top)
             .onScrollPhaseChange { _, phase in
                 frozen = phase.isScrolling ? (frozen ?? self.dashboard) : nil
             }
