@@ -8,7 +8,7 @@ A network diagnosis tool for iPhone and iPad. It shows live latency, DNS, path s
   <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/wifi-light-bottom.png" width="230" alt="Hop Trace in light mode">
 </p>
 
-**Status:** 1.0, not on the App Store yet ([ADR 0003](docs/adr/0003-sideload-first.md)). Each [release](https://github.com/reconbot/blinkengraphs-ios/releases/latest), and the rolling [`main-latest`](https://github.com/reconbot/blinkengraphs-ios/releases/tag/main-latest) prerelease, carries an unsigned IPA to sideload with AltStore or Sideloadly, which sign it with your Apple ID. Or build from source below. It is the iOS member of the [blinkengraphs](https://github.com/reconbot/blinkengraphs) family; the [Windows version](https://github.com/reconbot/blinkengraphs-win) also ships.
+**Status:** released, not on the App Store yet ([ADR 0003](docs/adr/0003-sideload-first.md)). Needs iOS 18 or later. Each [release](https://github.com/reconbot/blinkengraphs-ios/releases/latest), and the rolling [`main-latest`](https://github.com/reconbot/blinkengraphs-ios/releases/tag/main-latest) prerelease, carries an unsigned IPA to sideload with AltStore or Sideloadly, which sign it with your Apple ID. Or build from source below. It is the iOS member of the [blinkengraphs](https://github.com/reconbot/blinkengraphs) family; the [Windows version](https://github.com/reconbot/blinkengraphs-win) also ships.
 
 ## What it shows
 
@@ -20,10 +20,17 @@ A network diagnosis tool for iPhone and iPad. It shows live latency, DNS, path s
 - **Reports:** copy or share a plain-text report, optionally redacted, for bug reports.
 - **Light and dark**, following the system or chosen in Settings.
 
+## Settings
+
+- **Targets:** add, edit, reorder or delete them. A Target is an address, a host name, or a preset the editor offers as you type: Gateway (`gateway`) or System DNS (`system-dns`). Each measures any of ICMP, a TCP port, DNS (UDP 53) and Hop Trace, and the Latency and Hop Trace intervals are set here too ([ADR 0010](docs/adr/0010-editable-targets.md)). Reset returns to the spec's defaults.
+- **Graphs show** and **Numbers show:** p50, p95, p99, average or maximum, for the graph lines and the readout on each Target card. The Verdict always uses the median.
+- **Theme:** System, Light or Dark.
+
 | | | |
 |---|---|---|
 | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/wifi-dark-top.png" width="220"><br>All clear | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/cellular-light-top.png" width="220"><br>5G, IPv6-only | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/vpn-dark-top.png" width="220"><br>Through a VPN |
 | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/captive-dark-top.png" width="220"><br>Captive portal | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/offline-dark-top.png" width="220"><br>Offline | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/range-7d-wifi-light.png" width="220"><br>7 days |
+| <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/settings-dark.png" width="220"><br>Settings | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/targets-light.png" width="220"><br>Targets | <img src="https://raw.githubusercontent.com/reconbot/blinkengraphs-ios/ci-screenshots/main/target-new-dark.png" width="220"><br>New Target, with presets |
 
 Screenshots are rendered by CI from demo data on every change to `main`.
 
@@ -32,6 +39,21 @@ Screenshots are rendered by CI from demo data on every change to `main`.
 - Measures only while the app is open: no widget, no Live Activity ([ADR 0004](docs/adr/0004-foreground-only.md)).
 - History is kept per network, in memory for 15 minutes and on the device for 7 days ([ADR 0005](docs/adr/0005-history-per-link.md), [ADR 0007](docs/adr/0007-rollups-as-daily-json-lines.md)).
 - No system-wide CPU or memory: iOS doesn't expose them to apps.
+- After launch, a return to the app or a network change, Probes wait for the route to hold for 1 s, so a Wi-Fi to cellular switch isn't recorded as loss ([ADR 0012](docs/adr/0012-backgrounding-is-a-pause.md), [ADR 0013](docs/adr/0013-probes-wait-for-the-path-to-settle.md)).
+- iOS Local Network Privacy asks before the app sends TCP or DNS to the Gateway; if you decline, those Probes show as `denied`, never as loss. ICMP isn't gated, and you can change the choice in Settings > Privacy & Security > Local Network ([research](docs/research/local-network-privacy.md)).
+
+## Network traffic
+
+Besides your Targets, the app contacts only these hosts, all from the spec's [`defaults.json`](https://github.com/reconbot/blinkengraphs/blob/main/defaults.json):
+
+| Host | Why |
+|---|---|
+| `cp.cloudflare.com` | Captive portal check: a plain-HTTP GET that a sign-in page intercepts |
+| `ns3.cloudflare.com` | Public Address: a TXT query for `whoami.cloudflare.com` |
+| `ipv4.icanhazip.com`, `ipv6.icanhazip.com` | Public Address over HTTPS, to compare with the DNS answer |
+| Your DNS resolver | Name lookups for Targets and System DNS, and reverse DNS for Hop names |
+
+There is no analytics or account. MetricKit crash and hang reports stay on the device until you share them from the Report menu.
 
 ## Spec
 
