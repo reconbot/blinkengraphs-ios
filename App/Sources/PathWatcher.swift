@@ -28,6 +28,29 @@ struct PathState: Equatable, Sendable {
 
     var link: Link { Link(interface: interfaceName ?? "none", gateway: gateway) }
 
+    /// One entry per interface kind, in preference order. iOS lists every interface it could use,
+    /// several cellular ones among them, and a VPN app's tunnel even when it carries nothing, so
+    /// VPN appears only when traffic goes through it. The chips and the report both read this.
+    var shownInterfaces: [String] {
+        var seen = Set<String>()
+        return interfaces.filter { ($0 != "VPN" || vpn) && seen.insert($0).inserted }
+            .map { $0 == "Cellular" ? ["Cellular", radio].compactMap { $0 }.joined(separator: " ") : $0 }
+    }
+
+    /// The connection as labelled facts, for the report; the chips show the same facts.
+    var facts: [(label: String, value: String)] {
+        var out: [(String, String)] = [
+            ("Path", satisfied ? "Up" : "Down"),
+            ("Via", satisfied ? shownInterfaces.joined(separator: " · ").nonEmpty ?? "—" : "—"),
+            ("Supports", [ipv4 ? "IPv4" : nil, ipv6 ? "IPv6" : nil, dns ? "DNS" : nil].compactMap { $0 }.joined(separator: ", ")),
+            ("Gateway", gateway ?? "—"),
+        ]
+        if let linkQuality { out.append(("Link quality", linkQuality)) }
+        if expensive { out.append(("Metered", "yes")) }
+        if constrained { out.append(("Low Data", "yes")) }
+        return out
+    }
+
     init(_ path: NWPath) {
         satisfied = path.status == .satisfied
         interfaces = path.availableInterfaces.map { i in

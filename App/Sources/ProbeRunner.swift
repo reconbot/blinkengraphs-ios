@@ -2,14 +2,7 @@ import BlinkengraphsCore
 import Darwin
 import Foundation
 
-enum ProbeOutcome: Sendable {
-    case reply(ms: Double)
-    case lost
-    /// The OS refused to send it, e.g. Local Network Privacy. Not a loss.
-    case denied
-    /// The path can't reach this Target's IP version. Not sent, not a loss (spec rules/probe-stats.md).
-    case unreachable
-}
+typealias ProbeOutcome = Measurements.Outcome
 
 /// A send that fails because no route exists for the Target's IP version.
 func noRoute(_ e: Int32) -> Bool { e == ENETUNREACH || e == EAFNOSUPPORT || e == EADDRNOTAVAIL }

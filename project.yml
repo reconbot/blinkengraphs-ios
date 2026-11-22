@@ -9,7 +9,7 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.1.0" # x-release-please-version
     CURRENT_PROJECT_VERSION: "1"
 packages:
   BlinkengraphsKit:
@@ -57,6 +57,12 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # Shown by the Local Network Privacy prompt: reverse DNS of a LAN hop can go through Bonjour.
         NSLocalNetworkUsageDescription: blinkengraphs looks up the names of routers on your network to label its hop trace.
+        # The captive portal check must be plain HTTP: a portal can intercept it, not HTTPS
+        # (spec rules/verdict.md, "Captive Portal"). Only this host.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            cp.cloudflare.com:
+              NSExceptionAllowsInsecureHTTPLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).blinkengraphs

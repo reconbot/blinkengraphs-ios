@@ -13,10 +13,6 @@ enum SpecResources {
     static let specVersion: String = Bundle.main.url(forResource: ".release-please-manifest", withExtension: "json")
         .flatMap { try? Data(contentsOf: $0) }
         .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }?["."] ?? "unknown"
-    /// Every Target address in the Probe Group; a redacted report keeps these.
-    static var targetAddresses: Set<String> {
-        Set(defaults.probeGroup.targets.map(\.target).filter { $0.contains(".") || $0.contains(":") })
-    }
 
     private static func load<T>(_ name: String, _ decode: (Data) throws -> T) -> T {
         guard let value = try? decode(data(name)) else { fatalError("\(name).json missing or invalid") }

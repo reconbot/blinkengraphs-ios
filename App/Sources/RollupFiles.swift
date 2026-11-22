@@ -66,4 +66,23 @@ actor RollupFiles {
 final class RollupHistory {
     var rollups: Rollups
     init(keepDays: Int) { rollups = Rollups(keepDays: keepDays) }
+
+    struct GraphKey: Hashable {
+        var range: String, aggregate: Aggregate, link: Link, probe: Probe
+    }
+    /// Long-range lines change only as minutes pass, but a 7d one merges 10,080 Minutes:
+    /// computed once per minute, not once per refresh.
+    private var cache: [GraphKey: HistoryLine?] = [:]
+    private var cachedMinute = Int.min
+
+    func line(_ key: GraphKey, minute: Int, _ make: () -> HistoryLine?) -> HistoryLine? {
+        if minute != cachedMinute {
+            cache = [:]
+            cachedMinute = minute
+        }
+        if let hit = cache[key] { return hit }
+        let line = make()
+        cache[key] = line
+        return line
+    }
 }

@@ -31,13 +31,9 @@ enum GraphRange: String, CaseIterable, Identifiable {
     var buckets: Int { 60 }
     var bucketWidth: Double { seconds / Double(buckets) }
 
-    /// Bucket edges fixed to the clock, so only the newest bucket changes between refreshes.
-    func window(now: Double) -> ClosedRange<Double> {
-        GraphBuckets.alignedRange(now: now, span: seconds, count: buckets)
-    }
 }
 
-/// One Target's line: its ICMP Probe, else its first Probe.
+/// One Target's line, of its charted Probe (TargetLayout).
 struct Series: Identifiable {
     var target: String
     var probe: Probe
@@ -58,55 +54,45 @@ struct Series: Identifiable {
 
     @MainActor
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
-        let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
-        return targets.enumerated().compactMap { i, target in
-            let probe = Probe(target: target, protocol: "icmp")
-            let window = range.window(now: d.now)
-            if range.usesRollups {
-                guard let rollups = d.history?.rollups else { return nil }
-                let points = rollups.points(probe, on: d.path.link, from: window.lowerBound - range.bucketWidth,
-                                            to: window.upperBound, count: range.buckets + 1, aggregate: aggregate)
-                guard points.contains(where: { $0.count > 0 }) else { return nil }
-                let summary = rollups.summary(probe, on: d.path.link, from: d.now - range.seconds, to: d.now + 60,
-                                              aggregate: aggregate)
-                return Series(target: target, probe: probe, color: palette.series(i), points: points,
-                              now: d.now, range: range, summary: summary.value, aggregate: aggregate,
-                              loss: summary.loss)
+        let ram = Double(SpecResources.defaults.history.ramMinutes * 60)
+        let rollups = range.usesRollups ? d.history?.rollups : nil
+        return d.layout.charted.compactMap { entry in
+            guard let probe = entry.charted else { return nil }
+            let target = entry.target, link = d.path.link
+            func make() -> HistoryLine? {
+                HistoryLine.make(span: range.seconds, buckets: range.buckets, now: d.now, aggregate: aggregate,
+                                 ramSeconds: ram, results: d.results[probe], rollups: rollups,
+                                 probe: probe, link: link)
             }
-            guard let results = d.results[probe], !results.isEmpty else { return nil }
-            let inRange = results.filter { $0.at > d.now - range.seconds }
-            let replies = inRange.compactMap(\.rttMs)
-            return Series(
-                target: target, probe: probe, color: palette.series(i),
-                // One bucket more on the left, so the line runs to the edge as it scrolls.
-                points: GraphBuckets.points(results, from: window.lowerBound - range.bucketWidth,
-                                            to: window.upperBound, count: range.buckets + 1, aggregate: aggregate),
-                now: d.now, range: range,
-                summary: aggregate.value(ofSamples: replies), aggregate: aggregate,
-                loss: inRange.isEmpty ? 0 : 1 - Double(replies.count) / Double(inRange.count))
+            let line = range.usesRollups
+                ? d.history?.line(.init(range: range.rawValue, aggregate: aggregate, link: link, probe: probe),
+                                  minute: Int(d.now / 60), make)
+                : make()
+            guard let line else { return nil }
+            return Series(target: target, probe: probe, color: palette.series(entry.slot), points: line.points,
+                          now: d.now, range: range, summary: line.summary, aggregate: aggregate, loss: line.loss)
         }
     }
 }
 
-/// How often the Monitor refreshes; graph animations last this long so motion is continuous.
-let refreshSeconds = Double(SpecResources.defaults.probeGroup.latencyMs) / 1000
-
 // MARK: - Latency
 
 struct LatencyCard: View {
-    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     let dashboard: Dashboard
+    let series: [Series]
     @Binding var range: GraphRange
+    /// Off while scrolling: the chart holds still under the finger.
+    let animate: Bool
     @State private var hidden: Set<String> = []
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let all = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
+        let all = series
         let shown = all.filter { !hidden.contains($0.target) }
         Card(title: "Latency", accent: palette.color("color.section.latency")) {
             RangePicker(range: $range)
         } content: {
-            LatencyChart(series: shown, now: dashboard.now, range: range)
+            LatencyChart(series: shown, now: dashboard.now, range: range, animate: animate && dashboard.live)
                 .frame(height: 190)
                 .overlay {
                     if all.isEmpty {
@@ -130,90 +116,90 @@ struct LatencyCard: View {
     }
 }
 
+/// The gping-style chart, drawn with Canvas. A TimelineView moves the right edge with the clock,
+/// so every point scrolls at one speed, frame by frame, however often data arrives. Swift Charts
+/// animated mark by mark instead: points changed identity as gaps scrolled off and flew in and
+/// out, and each 1 s animation stalled when a refresh took longer.
 private struct LatencyChart: View {
     let series: [Series]
+    /// When the data was taken.
     let now: Double
     let range: GraphRange
+    /// Scroll with the clock; off while the user scrolls and for fixed demo data.
+    let animate: Bool
     @Environment(\.palette) private var palette
 
-    private struct Plot: Identifiable {
-        var id: String { "\(key)@\(start)" }
-        /// The bucket's start: stable across refreshes, so Charts animates a point instead of replacing it.
-        var start: Double
-        var key: String
-        var x: Double
-        var y: Double
-        var color: Color
-        var loss: Double
-    }
+    private let leading: CGFloat = 30, bottom: CGFloat = 18
 
     var body: some View {
-        let yMax = yMax
-        let (lines, dots) = plots(yMax: yMax)
-        let lonely = Set(Dictionary(grouping: lines, by: \.key).filter { $0.value.count == 1 }.keys)
-        Chart {
-            ForEach(lines) { p in
-                // A wide, faint stroke under the line reads as a glow on the dark surface.
-                // Monotone: smooth without overshooting a bucket's value.
-                LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Glow", "g" + p.key))
-                    .foregroundStyle(p.color.opacity(0.22))
-                    .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
-                LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Line", p.key))
-                    .foregroundStyle(p.color)
-                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
-            }
-            // A run of one bucket draws no line; a dot keeps fresh or gappy history visible.
-            ForEach(lines.filter { lonely.contains($0.key) }) { p in
-                PointMark(x: .value("Time", p.x), y: .value("ms", p.y))
-                    .foregroundStyle(p.color)
-                    .symbolSize(18)
-            }
-            // Loss as a strip along the floor, one tick per bucket at its worst Target's loss:
-            // per-line dots buried the lines whenever every Target was losing.
-            ForEach(dots) { d in
-                RectangleMark(xStart: .value("Time", d.x - width / 2), xEnd: .value("Time", d.x + width / 2),
-                              yStart: .value("ms", 0), yEnd: .value("ms", yMax * 0.06))
-                    .foregroundStyle(palette.loss.opacity(0.25 + 0.75 * min(1, d.loss * 2.5)))
-            }
-        }
-        .chartXScale(domain: -range.seconds...0)
-        .chartYScale(domain: 0...yMax)
-        .chartXAxis {
-            AxisMarks(values: Array(stride(from: 0, through: -range.seconds, by: -range.axisStep))) { v in
-                AxisGridLine().foregroundStyle(palette.cardEdge)
-                AxisValueLabel {
-                    if let s = v.as(Double.self) {
-                        Text(axisLabel(s)).foregroundStyle(palette.textWeak)
+        let yMax = yMax, lines = lines, loss = worstLoss
+        // About a pixel of movement per frame: 30 fps for 1m, rarely for 7d.
+        TimelineView(.animation(minimumInterval: max(1.0 / 30, range.seconds / 600), paused: !animate)) { context in
+            // Live data is stamped with the clock, so it never runs ahead of the edge.
+            let edge = animate ? max(context.date.timeIntervalSince1970, now) : now
+            Canvas { ctx, size in
+                let plot = CGRect(x: leading, y: 4, width: max(1, size.width - leading), height: max(1, size.height - bottom - 4))
+                drawGrid(&ctx, plot, yMax: yMax)
+                var clipped = ctx
+                clipped.clip(to: Path(plot))
+                let x = { (t: Double) in plot.maxX - CGFloat((edge - t) / range.seconds) * plot.width }
+                let y = { (v: Double) in plot.maxY - CGFloat(min(v, yMax) / yMax) * plot.height }
+                // Loss along the floor, one tick per bucket at its worst Target's loss.
+                let width = range.bucketWidth
+                for (start, l) in loss {
+                    let r = CGRect(x: x(start), y: plot.maxY - plot.height * 0.06,
+                                   width: max(1, x(start + width) - x(start)), height: plot.height * 0.06)
+                    clipped.fill(Path(r), with: .color(palette.loss.opacity(0.25 + 0.75 * min(1, l * 2.5))))
+                }
+                for line in lines {
+                    for run in line.runs {
+                        if run.count == 1, let p = run.first {
+                            let c = CGPoint(x: x(p.t), y: y(p.v))
+                            clipped.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(line.color))
+                            continue
+                        }
+                        var path = Path()
+                        for (i, p) in run.enumerated() {
+                            let pt = CGPoint(x: x(p.t), y: y(p.v))
+                            if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                        }
+                        clipped.stroke(path, with: .color(line.color),
+                                       style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
                 }
             }
         }
-        .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { v in
-                AxisGridLine().foregroundStyle(palette.cardEdge)
-                AxisValueLabel {
-                    if let ms = v.as(Double.self) { Text("\(Int(ms))").foregroundStyle(palette.textWeak) }
-                }
-            }
-        }
-        .chartLegend(.hidden)
-        .monospacedDigit()
-        .chartPlotStyle { $0.clipped() }
-        .animation(.smooth(duration: 0.4), value: series.map(\.target))
-        .animation(.smooth(duration: 0.5), value: yMax)
-        // Linear over one refresh interval: the lines glide left continuously, as in gping.
-        .animation(.linear(duration: refreshSeconds), value: now)
+        .accessibilityElement()
+        .accessibilityLabel("Latency over the last \(range.rawValue)")
     }
 
-    private func axisLabel(_ s: Double) -> String {
-        let a = -s
-        if a == 0 { return "now" }
-        if a < 120 { return "-\(Int(a))s" }
-        if a < 7200 { return "-\(Int(a / 60))m" }
-        if a < 172_800 { return "-\(Int(a / 3600))h" }
-        return "-\(Int(a / 86_400))d"
+    private struct Line { var color: Color; var runs: [[(t: Double, v: Double)]] }
+
+    /// Each series as runs of points at bucket middles. A bucket nothing was sent in is bridged:
+    /// at 1 s buckets a late round leaves one empty now and then, which broke lines into
+    /// fragments. A run breaks where everything sent was lost, or after 3 buckets and 5 s with nothing.
+    private var lines: [Line] {
+        let width = range.bucketWidth, longest = max(3 * width, 5)
+        return series.map { s in
+            var runs: [[(t: Double, v: Double)]] = [], run: [(t: Double, v: Double)] = []
+            for p in s.points {
+                let t = p.start + width / 2
+                if let v = p.value {
+                    if let last = run.last, t - last.t > longest { runs.append(run); run = [] }
+                    run.append((t, v))
+                } else if p.count > 0, !run.isEmpty {
+                    runs.append(run); run = []
+                }
+            }
+            if !run.isEmpty { runs.append(run) }
+            return Line(color: s.color, runs: runs)
+        }
+    }
+
+    private var worstLoss: [(Double, Double)] {
+        var worst: [Double: Double] = [:]
+        for s in series { for p in s.points where p.loss > 0 { worst[p.start] = max(worst[p.start] ?? 0, p.loss) } }
+        return worst.map { ($0.key, $0.value) }
     }
 
     /// Room above the busiest line, ignoring its rarest spikes; a round number, so the scale
@@ -225,28 +211,40 @@ private struct LatencyChart: View {
         return GraphBuckets.niceCeiling(max(10, p98 * 1.15))
     }
 
-    private var width: Double { range.bucketWidth }
+    /// Fixed gridlines: ages are measured back from the edge, so they hold still as data scrolls.
+    private func drawGrid(_ ctx: inout GraphicsContext, _ plot: CGRect, yMax: Double) {
+        let grid = GraphicsContext.Shading.color(palette.cardEdge)
+        let step = GraphBuckets.niceCeiling(yMax / 4)
+        var v = 0.0
+        while v <= yMax + 0.001 {
+            let y = plot.maxY - CGFloat(v / yMax) * plot.height
+            ctx.stroke(Path { $0.move(to: CGPoint(x: plot.minX, y: y)); $0.addLine(to: CGPoint(x: plot.maxX, y: y)) },
+                       with: grid, lineWidth: 0.5)
+            ctx.draw(Text("\(Int(v))").font(.caption2).foregroundStyle(palette.textWeak),
+                     at: CGPoint(x: plot.minX - 4, y: y), anchor: .trailing)
+            v += step
+        }
+        var age = 0.0
+        while age <= range.seconds + 0.001 {
+            let x = plot.maxX - CGFloat(age / range.seconds) * plot.width
+            ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: plot.minY)); $0.addLine(to: CGPoint(x: x, y: plot.maxY)) },
+                       with: grid, style: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+            ctx.draw(Text(axisLabel(-age)).font(.caption2).foregroundStyle(palette.textWeak),
+                     at: CGPoint(x: x, y: plot.maxY + 3), anchor: age == 0 ? .topTrailing : age >= range.seconds - 0.001 ? .topLeading : .top)
+            age += range.axisStep
+        }
+    }
 
-    /// Lines broken at buckets with no reply, and each bucket's worst loss across the shown Targets.
-    private func plots(yMax: Double) -> ([Plot], [Plot]) {
-        var lines: [Plot] = [], worstLoss: [Double: Double] = [:]
-        for s in series {
-            var segment = 0
-            for p in s.points {
-                let x = s.x(p)
-                if let v = p.value {
-                    lines.append(Plot(start: p.start, key: "\(s.target)#\(segment)", x: x, y: min(v, yMax),
-                                      color: s.color, loss: p.loss))
-                } else {
-                    segment += 1
-                }
-                if p.loss > 0 { worstLoss[p.start] = max(worstLoss[p.start] ?? 0, p.loss) }
-            }
+    /// In the unit of the range's gridline step, so 7d reads -1d, not -24h.
+    private func axisLabel(_ s: Double) -> String {
+        let a = -s
+        if a == 0 { return "now" }
+        switch range.axisStep {
+        case ..<60: return "-\(Int(a))s"
+        case ..<3600: return "-\(Int(a / 60))m"
+        case ..<86_400: return "-\(Int(a / 3600))h"
+        default: return "-\(Int(a / 86_400))d"
         }
-        let dots = worstLoss.map { start, loss in
-            Plot(start: start, key: "loss", x: start + width / 2 - now, y: 0, color: palette.loss, loss: loss)
-        }
-        return (lines, dots)
     }
 }
 
@@ -261,7 +259,7 @@ private struct LegendRow: View {
             Circle().fill(hidden ? Color.clear : series.color)
                 .overlay(Circle().strokeBorder(series.color, lineWidth: 1.5))
                 .frame(width: 9, height: 9)
-            Text(targetName(series.target))
+            Text(TargetLayout.name(series.target))
                 .foregroundStyle(hidden ? palette.textWeak : palette.text)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 6)
@@ -302,19 +300,15 @@ struct RangePicker: View {
 // MARK: - Targets
 
 struct TargetGrid: View {
-    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     let dashboard: Dashboard
-    let range: GraphRange
-    @Environment(\.palette) private var palette
+    let series: [Series]
 
     var body: some View {
-        let series = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
         let byTarget = Dictionary(grouping: Set(dashboard.stats.keys).union(dashboard.denied), by: \.target)
-        let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { byTarget[$0] != nil }
+        let entries = dashboard.layout.entries.filter { byTarget[$0.target] != nil }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {
-            ForEach(targets, id: \.self) { target in
-                TargetCard(target: target, probes: byTarget[target] ?? [], dashboard: dashboard,
-                           series: series.first { $0.target == target })
+            ForEach(entries) { entry in
+                TargetCard(entry: entry, dashboard: dashboard, series: series.first { $0.target == entry.target })
             }
         }
     }
@@ -322,18 +316,19 @@ struct TargetGrid: View {
 
 private struct TargetCard: View {
     @AppStorage(Aggregate.readoutStorageKey) private var aggregate = SpecResources.defaults.readoutAggregate
-    let target: String
-    let probes: [Probe]
+    let entry: TargetLayout.Entry
     let dashboard: Dashboard
     let series: Series?
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let sorted = probes.sorted { order($0) < order($1) }
+        let target = entry.target
+        // Probes that have reported, in the layout's order.
+        let sorted = entry.probes.filter { dashboard.stats[$0] != nil || dashboard.denied.contains($0) }
         let lead = sorted.first.flatMap { dashboard.stats[$0] }
         let leadValue = sorted.first.flatMap(readout)
-        let accent = series?.color ?? palette.color("color.section.cpu")
-        Card(title: targetName(target), accent: accent) {
+        let accent = series?.color ?? palette.series(entry.slot)
+        Card(title: entry.name, accent: accent) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(ms(leadValue))
                     .font(.system(size: 30, weight: .semibold, design: .rounded))
@@ -389,10 +384,6 @@ private struct TargetCard: View {
                              windowSeconds: Double(SpecResources.defaults.history.recentWindowS))
     }
 
-    private func order(_ p: Probe) -> Int {
-        p.protocol == "icmp" ? 0 : p.protocol.hasPrefix("tcp") ? 1 : p.protocol.hasPrefix("udp") ? 2 : 3
-    }
-
     private func label(_ p: Probe) -> String {
         let parts = p.protocol.split(separator: ":")
         return parts.map { $0.uppercased() }.joined(separator: " ")
@@ -423,7 +414,7 @@ private struct Sparkline: View {
         }
         .chartXScale(domain: -series.range.seconds...0)
         .chartPlotStyle { $0.clipped() }
-        .animation(.linear(duration: refreshSeconds), value: series.now)
+        // No scroll animation: six sparklines gliding every second cost more than they showed.
         .chartYScale(domain: 0...top)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
