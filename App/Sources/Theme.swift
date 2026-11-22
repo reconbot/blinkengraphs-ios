@@ -2,7 +2,8 @@ import BlinkengraphsCore
 import SwiftUI
 import UIKit
 
-/// The spec's tokens (dark) with this app's light palette; every color follows the system appearance.
+/// The spec's tokens and its light palette; every color follows the system appearance.
+/// A path the light palette lacks keeps its base (dark) value (spec tokens/README.md).
 struct Palette: Sendable {
     var dark: Tokens
     var light: Tokens?

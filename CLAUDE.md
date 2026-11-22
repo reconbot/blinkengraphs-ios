@@ -7,11 +7,12 @@ The spec repo, reconbot/blinkengraphs, is the authority. Pin a tagged version, a
 - `rules/`: Verdict (network half), Probe stats, Hop Trace, Graph aggregate, Defaults.
 - `vectors/`: conformance tests. An implementation conforms when every vector passes.
 - `defaults.json`: shared Probe Group, intervals, timeouts, history lengths. `defaults.override.json` here merges over it (`rules/defaults.md`); each override needs an ADR.
-- `tokens/`, `fixtures/`: colors and thresholds; data for previews and screenshots.
+- `tokens/`, `fixtures/`: colors (dark, plus a light palette) and thresholds; data for previews and screenshots.
+- `brand/icon.svg`: the app icon, rendered into the asset catalog at build time.
 
 Changes that touch more than one repo follow the spec's `docs/sync.md`: bump the pinned spec tag in a PR whenever the spec releases.
 
-A rule this app needs but the spec lacks is a spec PR first. The Windows reference implementation (reconbot/blinkengraphs-win) regenerates the vectors.
+A rule this app needs but the spec lacks is a spec PR first, with its vectors.
 
 iOS Local Network Privacy gates TCP and UDP to the LAN, not ICMP (`docs/research/local-network-privacy.md`). A Probe it blocks is `denied`, never loss.
 

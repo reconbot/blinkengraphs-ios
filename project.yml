@@ -29,7 +29,7 @@ targets:
         buildPhase: resources
       - path: spec/tokens/blinkengraphs.tokens.json
         buildPhase: resources
-      - path: App/Resources
+      - path: spec/tokens/blinkengraphs.light.tokens.json
         buildPhase: resources
       # The pinned spec's version, shown in copied reports.
       - path: spec/.release-please-manifest.json
