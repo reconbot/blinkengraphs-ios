@@ -50,7 +50,7 @@ swift test --package-path BlinkengraphsKit
 |---|---|
 | `spec/` | The spec, pinned to a release tag as a git submodule |
 | `defaults.override.json` | This platform's overrides of the spec's shared defaults |
-| `BlinkengraphsKit/` | `BlinkengraphsCore`: Probe stats, Hop Trace, Meters, Verdict. Foundation only |
+| `BlinkengraphsKit/` | `BlinkengraphsCore`: Probe stats, Hop Trace, Meters, Verdict, Graph aggregate, Defaults. Foundation only |
 | `App/` | The SwiftUI app: probing and UI |
 | `project.yml` | XcodeGen project spec; the `.xcodeproj` is generated |
 | `docs/adr/` | Decisions |

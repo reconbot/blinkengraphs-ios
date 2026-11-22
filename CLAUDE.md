@@ -4,7 +4,7 @@ Native Swift/SwiftUI. Scope is in `README.md`: network diagnosis only, no system
 
 The spec repo, reconbot/blinkengraphs, is the authority. Pin a tagged version, and run its vectors in CI:
 - `CONTEXT.md`: vocabulary. Use its terms in code and UI.
-- `rules/`: Verdict (network half), Probe stats, Hop Trace.
+- `rules/`: Verdict (network half), Probe stats, Hop Trace, Graph aggregate, Defaults.
 - `vectors/`: conformance tests. An implementation conforms when every vector passes.
 - `defaults.json`: shared Probe Group, intervals, timeouts, history lengths. `defaults.override.json` here merges over it (`rules/defaults.md`); each override needs an ADR.
 - `tokens/`, `fixtures/`: colors and thresholds; data for previews and screenshots.
