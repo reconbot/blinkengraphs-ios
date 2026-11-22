@@ -89,8 +89,9 @@ final class Monitor {
         tasks = []
         pathWatcher?.stop()
         pathWatcher = nil
-        // spec rules/history.md, "Minutes": shutting down writes every minute not yet written.
-        let rest = history.rollups.flush()
+        // Backgrounding isn't shutting down (ADR 0012): write the minutes that have ended and keep
+        // the open one pending, so a quick return doesn't split it.
+        let rest = history.rollups.flushEnded(at: Date().timeIntervalSince1970)
         if !rest.isEmpty { Task { [files] in await files.append(rest) } }
     }
 
@@ -177,12 +178,16 @@ final class Monitor {
                 runners.first { $0.handles(probe) }.map { (probe, addr, $0) }
             }
         }
+        // Any answer later than this waited out a suspension, not the network.
+        let deadline = Date().timeIntervalSince1970 + timeout.milliseconds / 1000 + history.rollups.graceSeconds
         var closed: [StoredMinute] = []
         await withTaskGroup(of: (Probe, Measurements.Outcome).self) { group in
             for (probe, addr, runner) in jobs {
                 group.addTask { (probe, await runner.run(probe, address: addr, timeout: timeout)) }
             }
             for await (probe, outcome) in group {
+                // Not measured: stopped mid-round, or suspended past the timeout (ADR 0012).
+                guard !Task.isCancelled, Date().timeIntervalSince1970 < deadline else { continue }
                 if let result = measurements.record(probe, outcome, sentOn: link, at: at) {
                     closed += history.rollups.record(probe, result, on: link)
                 }
@@ -259,6 +264,7 @@ final class Monitor {
             for await r in group { if let r { results.append(r) } }
             return results
         }
+        guard !Task.isCancelled else { return }
         measurements.recordSweep(results, target: target, sentOn: link)
         lookUpNames(results.compactMap(\.addr))
     }

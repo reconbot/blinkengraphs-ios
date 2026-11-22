@@ -28,10 +28,15 @@ struct BlinkengraphsApp: App {
                 dashboard
             }
         }
-        // Foreground-only diagnosis: iOS suspends us in the background anyway.
+        // Foreground-only diagnosis: iOS suspends us in the background anyway. Inactive (a
+        // screenshot, Control Center, a notification) keeps measuring.
         .onChange(of: phase) { _, phase in
             guard demo == nil, shots == nil else { return }
-            if phase == .active { monitor.start() } else { monitor.stop() }
+            switch phase {
+            case .active: monitor.start()
+            case .background: monitor.stop()
+            default: break
+            }
         }
     }
 
