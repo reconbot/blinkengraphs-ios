@@ -193,7 +193,7 @@ private struct LegendRow: View {
             Spacer(minLength: 6)
             Text("p50 \(ms(series.p50)) ms").foregroundStyle(palette.text)
             Text(percent(series.loss))
-                .foregroundStyle(series.loss > 0 ? palette.loss : palette.textWeak)
+                .foregroundStyle(percent(series.loss) != "0%" ? palette.loss : palette.textWeak)
                 .frame(width: 38, alignment: .trailing)
             Text(jitter.map { "±\(ms($0))" } ?? "")
                 .foregroundStyle(palette.textWeak)

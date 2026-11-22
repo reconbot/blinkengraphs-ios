@@ -50,16 +50,16 @@ enum Demo: String, CaseIterable {
         switch self {
         case .wifi, .offline:
             if gw { return Shape(base: 2.5, jitter: 1.2, loss: 0) }
-            return Shape(base: (v6 ? 11 : 13) * factor, jitter: 2.5, loss: 0.002, spikeEvery: 240)
+            return Shape(base: (v6 ? 11 : 13) * factor, jitter: 2.5, loss: 0, spikeEvery: 240)
         case .ispLoss:
             if gw { return Shape(base: 3, jitter: 1.5, loss: 0) }
             return Shape(base: (v6 ? 78 : 86) * factor, jitter: 16, loss: 0.21, spikeEvery: 150)
         case .cellular:
             if gw { return nil }
-            return Shape(base: (v6 ? 31 : 38) * factor, jitter: 9, loss: 0.004, spikeEvery: 200)
+            return Shape(base: (v6 ? 31 : 38) * factor, jitter: 9, loss: 0, spikeEvery: 200)
         case .vpn:
             if gw { return Shape(base: 3, jitter: 1.4, loss: 0) }
-            return Shape(base: (v6 ? 44 : 47) * factor, jitter: 6, loss: 0.003, spikeEvery: 300)
+            return Shape(base: (v6 ? 44 : 47) * factor, jitter: 6, loss: 0, spikeEvery: 300)
         }
     }
 

@@ -248,6 +248,7 @@ struct Card<Trailing: View, Content: View>: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer(minLength: 8)
                 trailing
             }
