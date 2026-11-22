@@ -95,7 +95,7 @@ func tcp(_ ip: String, _ port: UInt16) -> String {
 }
 
 print("uid \(getuid())")
-for (i, t) in ["1.1.1.1", "8.8.8.8"].enumerated() { print("icmp \(t): \(icmp(t, seq: UInt16(i)))") }
+for (i, t) in ["1.1.1.1", "9.9.9.9"].enumerated() { print("icmp \(t): \(icmp(t, seq: UInt16(i)))") }
 for ttl: Int32 in 1...6 { print("icmp 1.1.1.1 ttl \(ttl): \(icmp("1.1.1.1", ttl: ttl, seq: UInt16(100 + ttl)))") }
-for t in ["1.1.1.1", "8.8.8.8"] { print("dns \(t): \(dns(t))") }
-for t in ["1.1.1.1", "8.8.8.8"] { print("tcp \(t):443: \(tcp(t, 443))") }
+for t in ["1.1.1.1", "9.9.9.9"] { print("dns \(t): \(dns(t))") }
+for t in ["1.1.1.1", "9.9.9.9"] { print("tcp \(t):443: \(tcp(t, 443))") }

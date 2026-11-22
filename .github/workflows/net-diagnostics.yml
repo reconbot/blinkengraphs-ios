@@ -41,5 +41,14 @@ jobs:
           done
           echo "== curl http://cp.cloudflare.com/generate_204"
           curl -sS --max-time 5 -o /dev/null -w 'http %{http_code}, bytes %{size_download}\n' http://cp.cloudflare.com/generate_204 || true
+      - name: Quad9 as the second internet Target
+        continue-on-error: true
+        run: |
+          set -x
+          ping -c 3 -t 5 9.9.9.9 || true
+          nc -z -G 3 -w 3 9.9.9.9 443 && echo "tcp 443 ok" || true
+          curl -sS --max-time 5 -o /dev/null -w 'https://9.9.9.9/ http %{http_code}, tls verify %{ssl_verify_result}\n' https://9.9.9.9/ || true
+          dig +time=2 +tries=1 @9.9.9.9 cloudflare.com A | grep -E 'status:|Query time' || true
+          ping6 -c 3 2620:fe::fe || true
       - name: Unprivileged sockets, the way the app will probe
         run: swift .github/diagnostics/net-probe.swift
