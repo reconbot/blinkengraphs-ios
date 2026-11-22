@@ -1,0 +1,63 @@
+name: release-screenshots
+# release.yml calls this after publishing: a release created with GITHUB_TOKEN fires no
+# `release` event (https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow).
+# As blinkengraphs-win's.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to annotate
+        required: true
+
+concurrency:
+  group: release-screenshots-${{ inputs.tag }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Append screenshots for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          # The screenshots workflow renders the same commit in parallel; give it 15 minutes.
+          for _ in $(seq 90); do
+            gh api "repos/$GH_REPO/contents/$sha?ref=ci-screenshots" --silent 2>/dev/null && break
+            sleep 10
+          done
+          gh api "repos/$GH_REPO/contents/$sha?ref=ci-screenshots" --jq '[.[].name | select(endswith(".png"))]' > names.json
+          gh release view "$TAG" --json body --jq .body > body.md
+          # The scenarios in dark and light, then the longer ranges; a re-run replaces the section.
+          python3 - "$sha" > notes.md <<'PY'
+          import json, os, sys
+          sha = sys.argv[1]
+          raw = f"https://raw.githubusercontent.com/{os.environ['GH_REPO']}/ci-screenshots/{sha}"
+          body = open("body.md").read().split("<!-- screenshots -->")[0].rstrip()
+          names = set(json.load(open("names.json")))
+          out = [body, "", "<!-- screenshots -->", "## Screenshots", "",
+                 f"Rendered by CI from demo data at `{sha[:7]}`.", "", "<table>"]
+          scenarios = [("isp-loss", "ISP loss"), ("wifi", "All clear"), ("cellular", "5G, IPv6-only"),
+                       ("vpn", "Through a VPN"), ("captive", "Captive portal"), ("offline", "Offline")]
+          cells = [f'<td align="center" valign="top"><img src="{raw}/{n}-{look}-top.png" width="200"><br><sub>{c}, {look}</sub></td>'
+                   for n, c in scenarios for look in ("dark", "light") if f"{n}-{look}-top.png" in names]
+          for row in range(0, len(cells), 4):
+              out += ["<tr>"] + cells[row:row + 4] + ["</tr>"]
+          out += ["</table>", ""]
+          ranges = sorted(n for n in names if n.startswith("range-"))
+          if ranges:
+              out += ["### History", "", " ".join(f'<img src="{raw}/{n}" width="200">' for n in ranges), ""]
+          print("\n".join(out))
+          PY
+          gh release edit "$TAG" --notes-file notes.md
