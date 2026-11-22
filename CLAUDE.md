@@ -2,7 +2,7 @@
 
 Native Swift/SwiftUI. Scope is in `README.md`: network diagnosis only, no system CPU or memory.
 
-The spec repo, reconbot/blinkengraphs, is the authority, except where an ADR records an iOS departure (ADR 0014). Pin a tagged version, and run its vectors in CI:
+The spec repo, reconbot/blinkengraphs, is the authority, except where iOS departs for its normal use (spec ADR 0002; the departures are ADR 0014). Pin a tagged version, and run its vectors in CI:
 - `CONTEXT.md`: vocabulary. Use its terms in code and UI.
 - `rules/`: Verdict (network half), Probe stats, Hop Trace, Graph aggregate, Defaults.
 - `vectors/`: conformance tests. An implementation conforms when every vector passes, except those an ADR skips by name.
@@ -12,7 +12,7 @@ The spec repo, reconbot/blinkengraphs, is the authority, except where an ADR rec
 
 Changes that touch more than one repo follow the spec's `docs/sync.md`: bump the pinned spec tag in a PR whenever the spec releases.
 
-A rule this app needs but the spec lacks: decide it here in an ADR, build it, then raise it as a spec PR with its vectors.
+A rule this app needs but the spec lacks is a spec PR first, with its vectors, unless it is a departure for iOS's normal use: then it goes in ADR 0014.
 
 iOS Local Network Privacy gates TCP and UDP to the LAN, not ICMP (`docs/research/local-network-privacy.md`). A Probe it blocks is `denied`, never loss.
 

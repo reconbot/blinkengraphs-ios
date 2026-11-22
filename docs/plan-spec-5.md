@@ -60,7 +60,7 @@ App target:
 
 ## Spec gaps, decided here
 
-The owner's call: decide each here, build to it, and raise it as a spec PR afterwards. iOS may also depart from the spec outright (ADR 0014). Each decision is low-regret: it either matches a vector or adds a record the spec can drop.
+The owner's call: decide each here, build to it, and raise it as a spec PR afterwards. iOS may also depart from the spec outright (spec ADR 0002, iOS ADR 0014). Each decision is low-regret: it either matches a vector or adds a record the spec can drop.
 
 | # | Gap | Decision |
 |---|---|---|
@@ -82,7 +82,7 @@ The user opens the app because something is wrong, and asks three things in orde
 2. **Links strip.** One row per active Link: name, state colour from its own Findings, Gateway and primary Target latency, loss, and bytes spent. The default-route Link is marked. This is where other Links show their state (spec: "in the Panel only"). Tapping a row picks it for the chart.
 3. **Latency chart, one Link at a time.** Default: the default-route Link, every Target, so Gateway against internet shows where the fault sits, as it does today. A "Compare Links" toggle switches to the primary Target on every Link, one colour per Link, which answers "is it the Wi-Fi or the carrier". Both modes draw Paused shading, loss marks, the provisional edge and Link-change markers, so every gap explains itself.
 
-This departs from the spec's "one line per Link by default" (ADR 0014): six Targets times three Links is 18 lines in 190 pt, and the two questions need different cuts of the same data.
+This departs from the spec's "one line per Link by default" (spec ADR 0002, iOS ADR 0014): six Targets times three Links is 18 lines in 190 pt, and the two questions need different cuts of the same data.
 
 The mock (generated data, five scenarios) also shows the spec's Paused rule erasing iOS history: a 10-minute session is 83% of an hour, so 7d and All draw almost nothing but Paused. Candidate departure: draw any bucket with measured time, and shade its Paused share.
 
