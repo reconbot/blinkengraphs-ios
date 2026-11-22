@@ -29,15 +29,10 @@ struct ICMPProbeRunner: ProbeRunner {
     func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome {
         switch await offPool({ Sockets.echo(to: address, timeout: timeout) }) {
         case .reply(_, .echoReply, let ms): return .reply(ms: ms)
-        case .reply, .timeout: return .lost
-        case .sendFailed(let e): return Self.deniedOrLost(probe, errno: e)
+        // Local Network Privacy gates TCP and UDP, not ICMP: a device test pinged the Gateway
+        // with no prompt (docs/research/local-network-privacy.md). A failed send is a loss.
+        case .reply, .timeout, .sendFailed: return .lost
         }
-    }
-
-    /// Assumption, to confirm on a device: Local Network Privacy fails the send to a LAN address
-    /// with EHOSTUNREACH or EPERM. Only the Gateway is on the LAN, so only it can be denied.
-    static func deniedOrLost(_ probe: Probe, errno e: Int32) -> ProbeOutcome {
-        probe.target == Probe.gateway && (e == EHOSTUNREACH || e == EPERM) ? .denied : .lost
     }
 }
 
@@ -53,7 +48,10 @@ struct DNSProbeRunner: ProbeRunner {
         switch await offPool({ Sockets.dnsQuery(name, server: address, timeout: timeout) }) {
         case .answer(let ms): return .reply(ms: ms)
         case .timeout: return .lost
-        case .sendFailed(let e): return ICMPProbeRunner.deniedOrLost(probe, errno: e)
+        // UDP to a LAN address is gated (TN3179), but Apple names no errno for a denied send;
+        // EHOSTUNREACH and EPERM are the assumption, and only the Gateway is on the LAN.
+        case .sendFailed(let e):
+            return probe.target == Probe.gateway && (e == EHOSTUNREACH || e == EPERM) ? .denied : .lost
         }
     }
 }
