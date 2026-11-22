@@ -13,21 +13,22 @@ final class Monitor {
 
     private let defaults: Defaults
     private let runners: [any ProbeRunner]
-    private var histories: [Probe: ProbeHistory] = [:]
-    private var traces: [String: HopTrace] = [:]
-    private var sweepPlans: [String: HopSweepPlan] = [:]
+    private var linkHistories: LinkHistories
+    private var traces: [Link: [String: HopTrace]] = [:]
+    private var sweepPlans: [Link: [String: HopSweepPlan]] = [:]
     private var pathWatcher: PathWatcher?
     private var tasks: [Task<Void, Never>] = []
 
     init(defaults: Defaults) {
         self.defaults = defaults
+        linkHistories = LinkHistories(ramSeconds: Double(defaults.history.ramMinutes * 60))
         runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName)]
     }
 
     func start() {
         guard tasks.isEmpty else { return }
         let watcher = PathWatcher()
-        watcher.start { [weak self] state in Task { @MainActor in self?.path = state } }
+        watcher.start { [weak self] state in Task { @MainActor in self?.apply(state) } }
         pathWatcher = watcher
 
         let group = defaults.probeGroup
@@ -68,6 +69,8 @@ final class Monitor {
     }
 
     private func probeOnce() async {
+        // Results belong to the Link they were sent on, even if the path changes mid-flight.
+        let link = path.link
         let timeout = timeout(intervalMs: defaults.probeGroup.latencyMs)
         let jobs = defaults.probeGroup.probes.compactMap { probe in
             address(of: probe.target).flatMap { addr in
@@ -78,14 +81,29 @@ final class Monitor {
             for (probe, addr, runner) in jobs {
                 group.addTask { (probe, await runner.run(probe, address: addr, timeout: timeout)) }
             }
-            for await (probe, outcome) in group { record(probe, outcome) }
+            for await (probe, outcome) in group { record(probe, outcome, on: link) }
         }
-        let window = Double(defaults.history.recentWindowS)
-        stats = histories.mapValues { $0.stats(windowSeconds: window) }
+        refreshVerdict()
+    }
+
+    private func refreshVerdict() {
+        stats = linkHistories.stats(on: path.link, windowSeconds: Double(defaults.history.recentWindowS))
         verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) }))
     }
 
-    private func record(_ probe: Probe, _ outcome: ProbeOutcome) {
+    private func apply(_ state: PathState) {
+        let changed = state.link != path.link
+        path = state
+        if changed { linkChanged() }
+    }
+
+    private func linkChanged() {
+        denied = []
+        hops = (traces[path.link] ?? [:]).mapValues(\.table)
+        refreshVerdict()
+    }
+
+    private func record(_ probe: Probe, _ outcome: ProbeOutcome, on link: Link) {
         let at = Date().timeIntervalSince1970
         let rtt: Double?
         switch outcome {
@@ -93,21 +111,21 @@ final class Monitor {
         case .lost: rtt = nil
         case .denied:
             // rules/probe-stats.md: not a loss and not recorded; shown outside the Verdict.
-            denied.insert(probe)
+            if link == path.link { denied.insert(probe) }
             return
         }
-        denied.remove(probe)
-        histories[probe, default: ProbeHistory(ramSeconds: Double(defaults.history.ramMinutes * 60))]
-            .record(ProbeResult(at: at, rttMs: rtt))
+        if link == path.link { denied.remove(probe) }
+        linkHistories.record(probe, ProbeResult(at: at, rttMs: rtt), on: link)
     }
 
     private func sweepOnce(_ target: String) async {
         guard let addr = address(of: target) else { return }
+        let link = path.link
         let cfg = defaults.hopTrace
-        var plan = sweepPlans[target] ?? HopSweepPlan(maxTtl: cfg.maxTtl, fullSweepEveryS: Double(cfg.fullSweepEveryS))
-        var trace = traces[target] ?? HopTrace(hopWindow: cfg.hopWindow)
+        var plan = sweepPlans[link]?[target] ?? HopSweepPlan(maxTtl: cfg.maxTtl, fullSweepEveryS: Double(cfg.fullSweepEveryS))
+        var trace = traces[link]?[target] ?? HopTrace(hopWindow: cfg.hopWindow)
         let ttls = plan.ttls(at: Date().timeIntervalSince1970, pathLength: trace.pathLength)
-        sweepPlans[target] = plan
+        sweepPlans[link, default: [:]][target] = plan
 
         let timeout = timeout(intervalMs: defaults.probeGroup.traceMs)
         let results = await withTaskGroup(of: HopResult.self) { group in
@@ -128,7 +146,7 @@ final class Monitor {
         // Highest TTL first: past the Target every TTL is `reached`, and the lowest reached one,
         // recorded last, prunes the rows above it.
         for r in results.sorted(by: { $0.ttl > $1.ttl }) { trace.record(r) }
-        traces[target] = trace
-        hops[target] = trace.table
+        traces[link, default: [:]][target] = trace
+        if link == path.link { hops[target] = trace.table }
     }
 }
