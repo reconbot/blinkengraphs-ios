@@ -89,9 +89,7 @@ struct Series: Identifiable {
             guard let line else { return nil }
             return Series(target: target, probe: probe, color: palette.series(entry.slot), points: line.points,
                           now: d.now, span: span, ramWidth: ramWidth, storageWidth: storageWidth,
-                          handover: HistoryBuckets.handover(writtenThrough: rollups?.writtenThrough ?? 0,
-                                                            ram: d.results[probe] ?? []),
-                          summary: line.summary,
+                          handover: rollups?.writtenThrough ?? 0, summary: line.summary,
                           aggregate: aggregate, loss: line.loss)
         }
     }

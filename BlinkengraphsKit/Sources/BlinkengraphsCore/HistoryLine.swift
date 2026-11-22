@@ -14,12 +14,11 @@ public struct HistoryLine: Equatable, Sendable {
     /// Nil when the span holds nothing for this Probe.
     public static func make(span: Double, now: Double, aggregate: Aggregate, results: [ProbeResult]?,
                             rollups: Rollups?, probe: Probe, link: Link) -> HistoryLine? {
-        let ram = results ?? []
-        let written = rollups?.writtenThrough ?? 0
-        let c = HistoryBuckets.handover(writtenThrough: written, ram: ram)
+        let c = rollups?.writtenThrough ?? 0
         let stored = rollups?.minutes(probe, on: link, from: now - span, before: c) ?? []
+        let ram = results ?? []
         let points = HistoryBuckets.points(span: span, now: now, aggregate: aggregate, ram: ram,
-                                           stored: stored, writtenThrough: written)
+                                           stored: stored, writtenThrough: c)
         guard !points.isEmpty else { return nil }
         let recent = ram.filter { max(now - span, c) <= $0.at && $0.at <= now }
         // Raw samples rank exactly; once Minutes are involved everything goes through their histogram.

@@ -8,21 +8,13 @@ public enum HistoryBuckets {
         return (w, (w / 60).rounded(.up) * 60)
     }
 
-    /// `c`, where storage hands over to RAM: `min(writtenThrough, ⌈first / 60⌉ × 60)`, so RAM
-    /// serves every whole minute it holds and storage only what RAM no longer holds.
-    public static func handover(writtenThrough: Double, ram: [ProbeResult]) -> Double {
-        guard let first = ram.lazy.map(\.at).min() else { return writtenThrough }
-        return min(writtenThrough, (first / 60).rounded(.up) * 60)
-    }
-
     /// A graph's points over `[now − span, now]`, oldest first, one per bucket that has results.
-    /// Minutes before the handover `c` come from storage, results from `c` on from RAM, so
+    /// Minutes before `writtenThrough` (`c`) come from storage, results from `c` on from RAM, so
     /// nothing is counted twice or missed. Buckets align to the Unix epoch; a point's time is
     /// its bucket's start.
     public static func points(span: Double, now: Double, aggregate: Aggregate, ram: [ProbeResult],
-                              stored: [(m: Double, data: Minute)], writtenThrough: Double) -> [GraphPoint] {
+                              stored: [(m: Double, data: Minute)], writtenThrough c: Double) -> [GraphPoint] {
         let (w, W) = widths(span: span)
-        let c = handover(writtenThrough: writtenThrough, ram: ram)
         let from = now - span
         var minutes: [Double: [Minute]] = [:]
         for (m, data) in stored where from <= m + 59 && m < c {
