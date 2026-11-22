@@ -31,10 +31,6 @@ enum GraphRange: String, CaseIterable, Identifiable {
     var buckets: Int { 60 }
     var bucketWidth: Double { seconds / Double(buckets) }
 
-    /// Bucket edges fixed to the clock, so only the newest bucket changes between refreshes.
-    func window(now: Double) -> ClosedRange<Double> {
-        GraphBuckets.alignedRange(now: now, span: seconds, count: buckets)
-    }
 }
 
 /// One Target's line: its ICMP Probe, else its first Probe.
@@ -59,37 +55,21 @@ struct Series: Identifiable {
     @MainActor
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
+        let ram = Double(SpecResources.defaults.history.ramMinutes * 60)
         return targets.enumerated().compactMap { i, target in
-            let probe = Probe(target: target, protocol: "icmp")
-            let window = range.window(now: d.now)
-            if range.usesRollups {
-                guard let history = d.history else { return nil }
-                let link = d.path.link, minute = Int(d.now / 60)
-                let key = RollupHistory.GraphKey(range: range.rawValue, aggregate: aggregate, link: link, probe: probe)
-                let graph = history.graph(key, minute: minute) {
-                    let rollups = history.rollups
-                    let points = rollups.points(probe, on: link, from: window.lowerBound - range.bucketWidth,
-                                                to: window.upperBound, count: range.buckets + 1, aggregate: aggregate)
-                    let summary = rollups.summary(probe, on: link, from: Double(minute * 60) - range.seconds,
-                                                  to: Double(minute * 60 + 60), aggregate: aggregate)
-                    return RollupHistory.Graph(points: points, summary: summary.value, loss: summary.loss)
-                }
-                guard graph.points.contains(where: { $0.count > 0 }) else { return nil }
-                return Series(target: target, probe: probe, color: palette.series(i), points: graph.points,
-                              now: d.now, range: range, summary: graph.summary, aggregate: aggregate,
-                              loss: graph.loss)
+            let probe = Probe(target: target, protocol: "icmp"), link = d.path.link
+            func make() -> HistoryLine? {
+                HistoryLine.make(span: range.seconds, buckets: range.buckets, now: d.now, aggregate: aggregate,
+                                 ramSeconds: ram, results: d.results[probe], rollups: d.history?.rollups,
+                                 probe: probe, link: link)
             }
-            guard let results = d.results[probe], !results.isEmpty else { return nil }
-            let inRange = results.filter { $0.at > d.now - range.seconds }
-            let replies = inRange.compactMap(\.rttMs)
-            return Series(
-                target: target, probe: probe, color: palette.series(i),
-                // One bucket more on the left, so the line runs to the edge as it scrolls.
-                points: GraphBuckets.points(results, from: window.lowerBound - range.bucketWidth,
-                                            to: window.upperBound, count: range.buckets + 1, aggregate: aggregate),
-                now: d.now, range: range,
-                summary: aggregate.value(ofSamples: replies), aggregate: aggregate,
-                loss: inRange.isEmpty ? 0 : 1 - Double(replies.count) / Double(inRange.count))
+            let line = range.usesRollups
+                ? d.history?.line(.init(range: range.rawValue, aggregate: aggregate, link: link, probe: probe),
+                                  minute: Int(d.now / 60), make)
+                : make()
+            guard let line else { return nil }
+            return Series(target: target, probe: probe, color: palette.series(i), points: line.points,
+                          now: d.now, range: range, summary: line.summary, aggregate: aggregate, loss: line.loss)
         }
     }
 }

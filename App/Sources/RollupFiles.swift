@@ -70,20 +70,19 @@ final class RollupHistory {
     struct GraphKey: Hashable {
         var range: String, aggregate: Aggregate, link: Link, probe: Probe
     }
-    struct Graph { var points: [GraphPoint]; var summary: Double?; var loss: Double }
-    /// Long-range graphs change only as minutes pass, but a 7d one merges 10,080 Minutes per line:
+    /// Long-range lines change only as minutes pass, but a 7d one merges 10,080 Minutes:
     /// computed once per minute, not once per refresh.
-    private var cache: [GraphKey: Graph] = [:]
+    private var cache: [GraphKey: HistoryLine?] = [:]
     private var cachedMinute = Int.min
 
-    func graph(_ key: GraphKey, minute: Int, compute: () -> Graph) -> Graph {
+    func line(_ key: GraphKey, minute: Int, _ make: () -> HistoryLine?) -> HistoryLine? {
         if minute != cachedMinute {
             cache = [:]
             cachedMinute = minute
         }
         if let hit = cache[key] { return hit }
-        let graph = compute()
-        cache[key] = graph
-        return graph
+        let line = make()
+        cache[key] = line
+        return line
     }
 }
