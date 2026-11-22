@@ -27,3 +27,5 @@ Commits follow Conventional Commits. Commits, PRs and comments stay free of sess
 Never force-push `main` once the repo has a release.
 
 Release PRs (release-please) merge only after the owner has reviewed them and said so. Feature PRs merge when tests pass.
+
+Releases: release-please cuts them from Conventional Commits and writes the version into `project.yml` `MARKETING_VERSION`. `release-as` in `release-please-config.json` pins the next version; remove it once that release is out.
