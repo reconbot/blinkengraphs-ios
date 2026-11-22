@@ -21,6 +21,8 @@ struct PathState: Equatable, Sendable {
     var linkQuality: String?
     /// LTE, 5G and so on, when the path uses cellular.
     var radio: String?
+    /// The preferred interface is a tunnel: a VPN app, iCloud Private Relay or a Tailscale exit node.
+    var vpn = false
 
     init() {}
 
@@ -39,6 +41,7 @@ struct PathState: Equatable, Sendable {
             }
         }
         interfaceName = path.availableInterfaces.first?.name
+        vpn = interfaceName.map { $0.hasPrefix("utun") || $0.hasPrefix("ipsec") } ?? false
         gateway = path.gateways.lazy.compactMap { endpoint -> String? in
             guard case .hostPort(.ipv4(let a), _) = endpoint else { return nil }
             let ip = a.rawValue.map(String.init).joined(separator: ".")
