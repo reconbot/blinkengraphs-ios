@@ -10,6 +10,22 @@ enum Demo: String, CaseIterable {
         UserDefaults.standard.string(forKey: "demo").flatMap(Demo.init(rawValue:))
     }
 
+    /// `-range` at launch; nil (as in previews) means any range may be shown.
+    private static var launchRange: GraphRange? {
+        UserDefaults.standard.string(forKey: "range").flatMap(GraphRange.init(rawValue:))
+    }
+
+    /// `-ready <token>`: once the first screen has drawn, write an empty file named `token` to
+    /// Documents, so the screenshot script waits exactly as long as needed instead of a fixed sleep.
+    @MainActor
+    static func signalReady() async {
+        guard let token = UserDefaults.standard.string(forKey: "ready"),
+              let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        // Two frames: the first lays out, the second has drawn.
+        try? await Task.sleep(for: .milliseconds(100))
+        FileManager.default.createFile(atPath: docs.appendingPathComponent(token).path, contents: nil)
+    }
+
     @MainActor
     func dashboard(defaults: Defaults = SpecResources.defaults, now: Double = 1_800_000_000) -> Dashboard {
         var rng = SplitMix64(seed: UInt64(rawValue.hashValueStable))
@@ -51,7 +67,10 @@ enum Demo: String, CaseIterable {
                   .ipv6: PublicAddressReading(state: .agree, address: "2001:db8:1:4000::1", asn: "64500")]
         }
         if self != .offline && self != .captive { (d.hops, d.hopNames) = hops }
-        d.history = rollups(defaults: defaults, now: now, link: d.path.link, rng: &rng)
+        // A week of Rollups takes a while to make in a Debug build: only for a range that shows them.
+        if Self.launchRange?.usesRollups ?? true {
+            d.history = rollups(defaults: defaults, now: now, link: d.path.link, rng: &rng)
+        }
         return d
     }
 

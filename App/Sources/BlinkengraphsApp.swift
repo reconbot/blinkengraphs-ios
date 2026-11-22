@@ -18,6 +18,7 @@ struct BlinkengraphsApp: App {
                 .onAppear { apply(appearance) }
                 .onChange(of: appearance) { _, new in apply(new) }
                 .onChange(of: probeGroup) { _, json in monitor.setProbeGroup(ProbeGroupSetting.decode(json)) }
+                .task { if demo != nil { await Demo.signalReady() } }
         }
         // Foreground-only diagnosis: iOS suspends us in the background anyway.
         .onChange(of: phase) { _, phase in
