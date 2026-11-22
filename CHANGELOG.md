@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.0](https://github.com/reconbot/blinkengraphs-ios/compare/v1.0.0...v2.0.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* the app follows spec 3.0.0: whole-millisecond RTTs, history graphs per rules/history.md, p95 readouts by default.
+
+### Features
+
+* follow spec 3.0.0 ([#27](https://github.com/reconbot/blinkengraphs-ios/issues/27)) ([ef98ccb](https://github.com/reconbot/blinkengraphs-ios/commit/ef98ccb43811484b60c53f267f41eecf4e074b41))
+* history follows spec 2.0.0 rules/history.md ([#25](https://github.com/reconbot/blinkengraphs-ios/issues/25)) ([9f2fc23](https://github.com/reconbot/blinkengraphs-ios/commit/9f2fc23659d0860d7092530985c8dad5d8d66327))
+
 ## [1.0.0](https://github.com/reconbot/blinkengraphs-ios/compare/v0.1.0...v1.0.0) (2026-11-22)
 
 
