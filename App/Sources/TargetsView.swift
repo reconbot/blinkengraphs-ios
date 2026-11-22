@@ -99,17 +99,19 @@ private struct TargetEditor: View {
     @State var row: Defaults.Target
     let save: (Defaults.Target) -> Void
     @State private var tcp = ""
+    @State private var tcpOn = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
     init(row: Defaults.Target, save: @escaping (Defaults.Target) -> Void) {
         _row = State(initialValue: row)
         _tcp = State(initialValue: row.tcp.map(String.init) ?? "")
+        _tcpOn = State(initialValue: row.tcp != nil)
         self.save = save
     }
 
     private var valid: Bool {
-        Defaults.Target.isValid(row.target) && (tcp.isEmpty || UInt16(tcp).map { $0 > 0 } == true)
+        Defaults.Target.isValid(row.target) && (!tcpOn || UInt16(tcp).map { $0 > 0 } == true)
     }
 
     var body: some View {
@@ -133,8 +135,16 @@ private struct TargetEditor: View {
                 }
                 Section("Measure") {
                     Toggle("ICMP", isOn: $row.icmp)
-                    LabeledContent("TCP port") {
-                        TextField("off", text: $tcp).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    Toggle("TCP", isOn: $tcpOn.animation())
+                        .onChange(of: tcpOn) { _, on in if on && tcp.isEmpty { tcp = "443" } }
+                    if tcpOn {
+                        LabeledContent("Port") {
+                            TextField("443", text: $tcp)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 100)
+                        }
                     }
                     Toggle("DNS", isOn: $row.dns)
                     Toggle("Hop Trace", isOn: $row.trace).disabled(!row.traceable)
@@ -148,7 +158,7 @@ private struct TargetEditor: View {
                     Button("Save") {
                         var r = row
                         r.target = r.target.trimmingCharacters(in: .whitespaces).lowercased()
-                        r.tcp = Int(tcp)
+                        r.tcp = tcpOn ? Int(tcp) : nil
                         if !r.traceable { r.trace = false }
                         save(r)
                         dismiss()
