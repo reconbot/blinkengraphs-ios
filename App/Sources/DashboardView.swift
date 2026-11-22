@@ -72,16 +72,7 @@ struct DashboardView: View {
         let path = dashboard.path
         let info = Bundle.main.infoDictionary
         let app = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
-        var connection: [(String, String)] = [
-            ("Path", path.satisfied ? "Up" : "Down"),
-            ("Via", path.satisfied ? [path.interfaces.first, path.radio].compactMap { $0 }.joined(separator: " · ") : "—"),
-            ("Supports", [path.ipv4 ? "IPv4" : nil, path.ipv6 ? "IPv6" : nil, path.dns ? "DNS" : nil]
-                .compactMap { $0 }.joined(separator: ", ")),
-            ("Gateway", path.gateway ?? "—"),
-        ]
-        if let q = path.linkQuality { connection.append(("Link quality", q)) }
-        if path.expensive { connection.append(("Expensive", "yes")) }
-        if path.constrained { connection.append(("Low Data Mode", "yes")) }
+        let connection = path.facts.map { ($0.label, $0.value) }
         return Report.text(ReportInput(
             generatedAt: .now,
             header: ["app \(app)", "spec \(SpecResources.specVersion)",
@@ -200,7 +191,7 @@ private struct ConnectionChips: View {
                 if !path.satisfied {
                     chip("No network path", "wifi.slash", tint: palette.severity(.crit))
                 } else {
-                    ForEach(shownInterfaces, id: \.self) { chip(via($0), symbol($0)) }
+                    ForEach(path.shownInterfaces, id: \.self) { chip($0, symbol($0)) }
                     if path.ipv4 { chip("IPv4", "4.circle") }
                     if path.ipv6 { chip("IPv6", "6.circle") }
                     if let gw = path.gateway { chip(gw, "point.3.connected.trianglepath.dotted") }
@@ -216,19 +207,10 @@ private struct ConnectionChips: View {
 
     /// One chip per kind. iOS lists every interface it could use, several cellular ones among them,
     /// and a VPN app's tunnel even when it carries nothing; VPN shows only when traffic goes through it.
-    private var shownInterfaces: [String] {
-        var seen = Set<String>()
-        return path.interfaces.filter { ($0 != "VPN" || path.vpn) && seen.insert($0).inserted }
-    }
-
-    private func via(_ interface: String) -> String {
-        interface == "Cellular" ? ["Cellular", path.radio].compactMap { $0 }.joined(separator: " ") : interface
-    }
-
     private func symbol(_ interface: String) -> String {
         switch interface {
         case "Wi-Fi": "wifi"
-        case "Cellular": "antenna.radiowaves.left.and.right"
+        case let s where s.hasPrefix("Cellular"): "antenna.radiowaves.left.and.right"
         case "Ethernet": "cable.connector"
         case "VPN": "lock.shield"
         default: "network"
