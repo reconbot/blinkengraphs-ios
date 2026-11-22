@@ -95,21 +95,30 @@ private struct TargetRowLabel: View {
     }
 }
 
-private struct TargetEditor: View {
+struct TargetEditor: View {
     @State var row: Defaults.Target
     let save: (Defaults.Target) -> Void
     @State private var tcp = ""
+    @State private var tcpOn = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
     init(row: Defaults.Target, save: @escaping (Defaults.Target) -> Void) {
         _row = State(initialValue: row)
         _tcp = State(initialValue: row.tcp.map(String.init) ?? "")
+        _tcpOn = State(initialValue: row.tcp != nil)
         self.save = save
     }
 
     private var valid: Bool {
-        Defaults.Target.isValid(row.target) && (tcp.isEmpty || UInt16(tcp).map { $0 > 0 } == true)
+        Defaults.Target.isValid(row.target) && (!tcpOn || UInt16(tcp).map { $0 > 0 } == true)
+    }
+
+    /// What a DNS Probe sends (ProbeRunner.swift, Lookups.swift), so the toggle names its transport.
+    private var dnsDetail: String {
+        let name = SpecResources.defaults.dnsQueryName
+        return row.target.trimmingCharacters(in: .whitespaces).lowercased() == Probe.systemDNS
+            ? "System resolver, a random name under \(name)" : "UDP 53, asks for \(name)"
     }
 
     var body: some View {
@@ -120,6 +129,12 @@ private struct TargetEditor: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                    ForEach(TargetLayout.presets(completing: row.target), id: \.self) { preset in
+                        Button { row.target = preset } label: {
+                            LabeledContent(TargetLayout.name(preset), value: preset)
+                        }
+                        .foregroundStyle(palette.text)
+                    }
                 } header: { Text("Target") } footer: {
                     if !row.target.isEmpty && !Defaults.Target.isValid(row.target) {
                         Text("Not an address or a host name.").foregroundStyle(palette.severity(.crit))
@@ -127,10 +142,21 @@ private struct TargetEditor: View {
                 }
                 Section("Measure") {
                     Toggle("ICMP", isOn: $row.icmp)
-                    LabeledContent("TCP port") {
-                        TextField("off", text: $tcp).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    Toggle("TCP", isOn: $tcpOn.animation())
+                        .onChange(of: tcpOn) { _, on in if on && tcp.isEmpty { tcp = "443" } }
+                    if tcpOn {
+                        LabeledContent("Port") {
+                            TextField("443", text: $tcp)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 100)
+                        }
                     }
-                    Toggle("DNS", isOn: $row.dns)
+                    Toggle(isOn: $row.dns) {
+                        Text("DNS")
+                        Text(dnsDetail)
+                    }
                     Toggle("Hop Trace", isOn: $row.trace).disabled(!row.traceable)
                 }
             }
@@ -142,7 +168,7 @@ private struct TargetEditor: View {
                     Button("Save") {
                         var r = row
                         r.target = r.target.trimmingCharacters(in: .whitespaces).lowercased()
-                        r.tcp = Int(tcp)
+                        r.tcp = tcpOn ? Int(tcp) : nil
                         if !r.traceable { r.trace = false }
                         save(r)
                         dismiss()
