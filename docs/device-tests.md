@@ -4,7 +4,7 @@ What CI and the Simulator can't show. Each result goes into `docs/research/`, an
 
 | # | Test | How | Sets |
 |---|---|---|---|
-| 1 | Settle time after a return to the app | On Wi-Fi, cellular and a VPN: leave for 1 min, 10 min and 1 h, return, and note how long until every Probe replies. The Report menu's copy shows each Probe's first results | ADR 0015's 2 s |
+| 1 | Settle time after a return to the app | On Wi-Fi, cellular and a VPN: leave for 1 min, 10 min and 1 h, return, and note how long until every Target card shows a number with no loss | ADR 0015's 2 s |
 | 2 | Lifecycle order | Leave by Home, the app switcher, the lock button and an incoming call; check the Pause in History starts within a second of leaving | ADR 0016 |
 | 3 | Kill | Force-quit from the app switcher, and run Xcode's memory-warning loop until iOS ends the app; relaunch: the gap draws as Paused, starting at the last save | ADR 0016 |
 | 4 | Pause written under lock | Settings → Face ID & Passcode → Require Passcode Immediately; lock the phone with the app open; reopen: no gap missing its Pause | ADR 0016 |
