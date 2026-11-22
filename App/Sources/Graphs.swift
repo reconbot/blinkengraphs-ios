@@ -13,7 +13,13 @@ enum GraphRange: String, CaseIterable, Identifiable {
         case .fifteenMinutes: 900
         }
     }
-    var buckets: Int { self == .fifteenMinutes ? 90 : 60 }
+    var buckets: Int { 60 }
+    var bucketWidth: Double { seconds / Double(buckets) }
+
+    /// Bucket edges fixed to the clock, so only the newest bucket changes between refreshes.
+    func window(now: Double) -> ClosedRange<Double> {
+        GraphBuckets.alignedRange(now: now, span: seconds, count: buckets)
+    }
 }
 
 /// One Target's line: its ICMP Probe, else its first Probe.
@@ -33,12 +39,13 @@ struct Series: Identifiable {
         return targets.enumerated().compactMap { i, target in
             let probe = Probe(target: target, protocol: "icmp")
             guard let results = d.results[probe], !results.isEmpty else { return nil }
-            let from = d.now - range.seconds
-            let inRange = results.filter { $0.at > from }
+            let window = range.window(now: d.now)
+            let inRange = results.filter { $0.at > d.now - range.seconds }
             let replies = inRange.compactMap(\.rttMs)
             return Series(
                 target: target, probe: probe, color: palette.series(i),
-                points: GraphBuckets.points(results, from: from, to: d.now + 1, count: range.buckets, aggregate: .p50),
+                points: GraphBuckets.points(results, from: window.lowerBound, to: window.upperBound,
+                                            count: range.buckets, aggregate: .p50),
                 p50: Aggregate.p50.value(ofSamples: replies),
                 loss: inRange.isEmpty ? 0 : 1 - Double(replies.count) / Double(inRange.count))
         }
@@ -105,12 +112,15 @@ private struct LatencyChart: View {
         Chart {
             ForEach(lines) { p in
                 // A wide, faint stroke under the line reads as a glow on the dark surface.
+                // Monotone: smooth without overshooting a bucket's value.
                 LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Glow", "g" + p.key))
                     .foregroundStyle(p.color.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.monotone)
                 LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Line", p.key))
                     .foregroundStyle(p.color)
                     .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.monotone)
             }
             // A run of one bucket draws no line; a dot keeps fresh or gappy history visible.
             ForEach(lines.filter { lonely.contains($0.key) }) { p in
@@ -121,7 +131,7 @@ private struct LatencyChart: View {
             // Loss as a strip along the floor, one tick per bucket at its worst Target's loss:
             // per-line dots buried the lines whenever every Target was losing.
             ForEach(dots) { d in
-                RectangleMark(xStart: .value("Time", d.x), xEnd: .value("Time", d.x + width),
+                RectangleMark(xStart: .value("Time", d.x - width / 2), xEnd: .value("Time", d.x + width / 2),
                               yStart: .value("ms", 0), yEnd: .value("ms", yMax * 0.06))
                     .foregroundStyle(palette.loss.opacity(0.25 + 0.75 * min(1, d.loss * 2.5)))
             }
@@ -149,17 +159,21 @@ private struct LatencyChart: View {
         .chartLegend(.hidden)
         .monospacedDigit()
         .animation(.smooth(duration: 0.4), value: series.map(\.target))
+        .animation(.smooth(duration: 0.5), value: yMax)
+        .animation(.easeOut(duration: 0.6), value: end)
     }
 
-    /// Room above the busiest line, ignoring its rarest spikes.
+    /// Room above the busiest line, ignoring its rarest spikes; a round number, so the scale
+    /// changes only when the data crosses one.
     private var yMax: Double {
         let values = series.flatMap { $0.points.compactMap(\.value) }.sorted()
         guard !values.isEmpty else { return 50 }
         let p98 = values[Int(Double(values.count - 1) * 0.98)]
-        return max(10, p98 * 1.25)
+        return GraphBuckets.niceCeiling(max(10, p98 * 1.15))
     }
 
-    private var width: Double { range.seconds / Double(range.buckets) }
+    private var width: Double { range.bucketWidth }
+    private var end: Double { range.window(now: now).upperBound }
 
     /// Lines broken at buckets with no reply, and each bucket's worst loss across the shown Targets.
     private func plots(yMax: Double) -> ([Plot], [Plot]) {
@@ -167,7 +181,8 @@ private struct LatencyChart: View {
         for s in series {
             var segment = 0
             for p in s.points {
-                let x = p.start - now
+                // Each bucket at its middle, against the window's fixed right edge.
+                let x = p.start + width / 2 - end
                 if let v = p.value {
                     lines.append(Plot(key: "\(s.target)#\(segment)", x: x, y: min(v, yMax), color: s.color, loss: p.loss))
                 } else {

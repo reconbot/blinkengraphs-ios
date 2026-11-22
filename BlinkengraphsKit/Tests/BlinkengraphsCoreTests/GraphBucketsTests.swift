@@ -38,3 +38,21 @@ import BlinkengraphsCore
     #expect(h.results(on: wifi)[probe] == [ProbeResult(at: 1, rttMs: 3)])
     #expect(h.results(on: Link(interface: "pdp_ip0", gateway: nil)).isEmpty)
 }
+
+@Test func alignedBucketsStayPutAsTimePasses() {
+    // A bucket's edges are multiples of its width, so a refresh moves no sample to another bucket.
+    let a = GraphBuckets.alignedRange(now: 1000.2, span: 60, count: 6)
+    let b = GraphBuckets.alignedRange(now: 1009.9, span: 60, count: 6)
+    #expect(a == b)
+    #expect(a == 950...1010)
+    #expect(GraphBuckets.alignedRange(now: 1010.0, span: 60, count: 6) == 960...1020)
+}
+
+@Test func niceCeilingOnlyStepsAtRoundNumbers() {
+    #expect(GraphBuckets.niceCeiling(9) == 10)
+    #expect(GraphBuckets.niceCeiling(21) == 25)
+    #expect(GraphBuckets.niceCeiling(24.9) == 25)
+    #expect(GraphBuckets.niceCeiling(61) == 75)
+    #expect(GraphBuckets.niceCeiling(140) == 150)
+    #expect(GraphBuckets.niceCeiling(1300) == 1500)
+}
