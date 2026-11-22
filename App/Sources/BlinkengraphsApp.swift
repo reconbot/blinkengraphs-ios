@@ -8,7 +8,7 @@ struct BlinkengraphsApp: App {
     var body: some Scene {
         WindowGroup {
             VerdictView(findings: monitor.verdict, probes: monitor.stats, denied: monitor.denied,
-                        path: monitor.path, hops: monitor.hops)
+                        path: monitor.path, hops: monitor.hops, hopNames: monitor.hopNames)
                 .environment(\.tokens, SpecResources.tokens)
         }
         // Foreground-only diagnosis: iOS suspends us in the background anyway.

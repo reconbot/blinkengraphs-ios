@@ -114,6 +114,14 @@ enum Sockets {
         }
     }
 
+    /// The PTR name for `ip`, or nil when it has none. Blocks on the system resolver.
+    static func reverseDNS(_ ip: String) -> String? {
+        guard var a = Address(ip, port: 0) else { return nil }
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        let rc = a.withSockaddr { getnameinfo($0, $1, &host, socklen_t(host.count), nil, 0, NI_NAMEREQD) }
+        return rc == 0 ? String(cString: host) : nil
+    }
+
     private static func send(_ fd: Int32, _ bytes: [UInt8], to dst: Address) -> Bool {
         var dst = dst
         return dst.withSockaddr { sendto(fd, bytes, bytes.count, 0, $0, $1) } == bytes.count

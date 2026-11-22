@@ -6,6 +6,7 @@ import BlinkengraphsCore
     #expect(d.probeGroup.name == "Default")
     #expect(d.probeGroup.targets.map(\.target) == ["gateway", "1.1.1.1", "9.9.9.9", "2606:4700:4700::1111", "2620:fe::fe", "system-dns"])
     #expect(d.probeTimeoutMs(intervalMs: 1000) == 1000)
+    #expect(d.hopTrace.reverseDns)
     #expect(d.probeGroup.probes.contains(Probe(target: "1.1.1.1", protocol: "tcp:443")))
 }
 

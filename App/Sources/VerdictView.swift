@@ -7,6 +7,7 @@ struct VerdictView: View {
     let denied: Set<Probe>
     let path: PathState
     let hops: [String: [HopRow]]
+    var hopNames: [String: String] = [:]
     @Environment(\.tokens) private var tokens
 
     var body: some View {
@@ -44,7 +45,9 @@ struct VerdictView: View {
                 }
                 ForEach(hops.keys.sorted(), id: \.self) { target in
                     Section("Hop Trace to \(target)") {
-                        ForEach(hops[target] ?? [], id: \.ttl) { HopRowView(row: $0) }
+                        ForEach(hops[target] ?? [], id: \.ttl) { row in
+                            HopRowView(row: row, name: row.addr.flatMap { hopNames[$0] })
+                        }
                     }
                 }
             }
@@ -78,12 +81,19 @@ struct VerdictView: View {
 
 private struct HopRowView: View {
     let row: HopRow
+    let name: String?
     @Environment(\.tokens) private var tokens
 
     var body: some View {
         HStack {
             Text("\(row.ttl)").frame(width: 24, alignment: .trailing).foregroundStyle(.secondary)
-            Text(row.addr ?? "*").lineLimit(1)
+            // Like mtr: the name when reverse DNS has one, the address beneath it.
+            VStack(alignment: .leading, spacing: 0) {
+                Text(name ?? row.addr ?? "*").lineLimit(1).truncationMode(.middle)
+                if name != nil, let addr = row.addr {
+                    Text(addr).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
             Spacer()
             if row.loss > 0 {
                 Text("\(Int((row.loss * 100).rounded()))%").foregroundStyle(tokens.swiftUIColor("color.loss"))

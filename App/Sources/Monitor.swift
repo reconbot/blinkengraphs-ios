@@ -10,6 +10,9 @@ final class Monitor {
     private(set) var verdict: [Finding] = Verdict.evaluate(VerdictInput(probes: []))
     private(set) var path = PathState()
     private(set) var hops: [String: [HopRow]] = [:]
+    /// Hop names by address, from reverse DNS (spec rules/hop-trace.md, "Names").
+    private(set) var hopNames: [String: String] = [:]
+    private var namesRequested: Set<String> = []
 
     private let defaults: Defaults
     private let runners: [any ProbeRunner]
@@ -92,6 +95,17 @@ final class Monitor {
         refreshVerdict()
     }
 
+    /// Once per address, off the main actor; a sweep never waits for it.
+    private func lookUpNames(_ addrs: [String]) {
+        guard defaults.hopTrace.reverseDns else { return }
+        for addr in addrs where namesRequested.insert(addr).inserted {
+            Task { [weak self] in
+                guard let name = await offPool({ Sockets.reverseDNS(addr) }) else { return }
+                self?.hopNames[addr] = name
+            }
+        }
+    }
+
     private func refreshVerdict() {
         stats = linkHistories.stats(on: path.link, windowSeconds: Double(defaults.history.recentWindowS))
         verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) },
@@ -160,5 +174,6 @@ final class Monitor {
         for r in results.sorted(by: { $0.ttl > $1.ttl }) { trace.record(r) }
         traces[link, default: [:]][target] = trace
         if link == path.link { hops[target] = trace.table }
+        lookUpNames(trace.table.compactMap(\.addr))
     }
 }
