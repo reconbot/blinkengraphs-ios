@@ -38,6 +38,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: blinkengraphs
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # Shown by the Local Network Privacy prompt: reverse DNS of a LAN hop can go through Bonjour.

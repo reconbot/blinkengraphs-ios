@@ -73,7 +73,7 @@ struct VerdictView: View {
         let app = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
         var connection: [(String, String)] = [
             ("Path", path.satisfied ? "Up" : "Down"),
-            ("Via", [path.interfaces.first, path.radio].compactMap { $0 }.joined(separator: " · ")),
+            ("Via", path.satisfied ? [path.interfaces.first, path.radio].compactMap { $0 }.joined(separator: " · ") : "—"),
             ("Supports", [path.ipv4 ? "IPv4" : nil, path.ipv6 ? "IPv6" : nil, path.dns ? "DNS" : nil]
                 .compactMap { $0 }.joined(separator: ", ")),
             ("Gateway", path.gateway ?? "—"),
