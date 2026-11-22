@@ -141,7 +141,7 @@ final class Monitor {
     }
 
     private func linkChanged() {
-        denied = []
+        if !denied.isEmpty { denied = [] }
         hops = (traces[path.link] ?? [:]).mapValues(\.table)
         refreshVerdict()
     }
@@ -154,12 +154,13 @@ final class Monitor {
         case .lost: rtt = nil
         case .denied:
             // rules/probe-stats.md: not a loss and not recorded; shown outside the Verdict.
-            if link == path.link { denied.insert(probe) }
+            // Observed state: writing it re-renders the screen, so only write on a change.
+            if link == path.link, !denied.contains(probe) { denied.insert(probe) }
             return
         case .unreachable:
             return
         }
-        if link == path.link { denied.remove(probe) }
+        if link == path.link, denied.contains(probe) { denied.remove(probe) }
         let result = ProbeResult(at: at, rttMs: rtt)
         linkHistories.record(probe, result, on: link)
         let closed = history.rollups.record(probe, result, on: link)

@@ -8,18 +8,25 @@ struct DashboardView: View {
     /// Remembered; also settable at launch (`-range 24h`) for screenshots.
     @AppStorage("range") private var range: GraphRange = .fifteenMinutes
     @State private var showingSettings = false
+    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
+    /// The screen as it was when a scroll began. Redrawing every second under a moving finger
+    /// made scrolling jitter, so updates wait until the scroll ends.
+    @State private var frozen: Dashboard?
 
     /// `Severity` sorts most severe first.
     private var worst: Severity { dashboard.findings.map(\.severity).min() ?? .ok }
 
     var body: some View {
+        let dashboard = frozen ?? self.dashboard
+        // Once per refresh, shared by the chart, its legend and the Target cards.
+        let series = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     VerdictBanner(findings: dashboard.findings)
                     ConnectionChips(path: dashboard.path)
-                    LatencyCard(dashboard: dashboard, range: $range)
-                    TargetGrid(dashboard: dashboard, range: range)
+                    LatencyCard(dashboard: dashboard, series: series, range: $range, animate: frozen == nil)
+                    TargetGrid(dashboard: dashboard, series: series)
                     ForEach(dashboard.hops.keys.sorted(by: Self.ipv4First), id: \.self) { target in
                         HopTraceCard(target: target, rows: dashboard.hops[target] ?? [], names: dashboard.hopNames)
                     }
@@ -30,6 +37,9 @@ struct DashboardView: View {
             }
             // `-anchor bottom` opens scrolled to the end, so screenshots can reach the Hop Traces.
             .defaultScrollAnchor(UserDefaults.standard.string(forKey: "anchor") == "bottom" ? .bottom : .top)
+            .onScrollPhaseChange { _, phase in
+                frozen = phase.isScrolling ? (frozen ?? self.dashboard) : nil
+            }
             .background(palette.background.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .principal) { Wordmark(severity: worst) }

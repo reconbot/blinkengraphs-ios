@@ -63,15 +63,21 @@ struct Series: Identifiable {
             let probe = Probe(target: target, protocol: "icmp")
             let window = range.window(now: d.now)
             if range.usesRollups {
-                guard let rollups = d.history?.rollups else { return nil }
-                let points = rollups.points(probe, on: d.path.link, from: window.lowerBound - range.bucketWidth,
-                                            to: window.upperBound, count: range.buckets + 1, aggregate: aggregate)
-                guard points.contains(where: { $0.count > 0 }) else { return nil }
-                let summary = rollups.summary(probe, on: d.path.link, from: d.now - range.seconds, to: d.now + 60,
-                                              aggregate: aggregate)
-                return Series(target: target, probe: probe, color: palette.series(i), points: points,
-                              now: d.now, range: range, summary: summary.value, aggregate: aggregate,
-                              loss: summary.loss)
+                guard let history = d.history else { return nil }
+                let link = d.path.link, minute = Int(d.now / 60)
+                let key = RollupHistory.GraphKey(range: range.rawValue, aggregate: aggregate, link: link, probe: probe)
+                let graph = history.graph(key, minute: minute) {
+                    let rollups = history.rollups
+                    let points = rollups.points(probe, on: link, from: window.lowerBound - range.bucketWidth,
+                                                to: window.upperBound, count: range.buckets + 1, aggregate: aggregate)
+                    let summary = rollups.summary(probe, on: link, from: Double(minute * 60) - range.seconds,
+                                                  to: Double(minute * 60 + 60), aggregate: aggregate)
+                    return RollupHistory.Graph(points: points, summary: summary.value, loss: summary.loss)
+                }
+                guard graph.points.contains(where: { $0.count > 0 }) else { return nil }
+                return Series(target: target, probe: probe, color: palette.series(i), points: graph.points,
+                              now: d.now, range: range, summary: graph.summary, aggregate: aggregate,
+                              loss: graph.loss)
             }
             guard let results = d.results[probe], !results.isEmpty else { return nil }
             let inRange = results.filter { $0.at > d.now - range.seconds }
@@ -94,19 +100,21 @@ let refreshSeconds = Double(SpecResources.defaults.probeGroup.latencyMs) / 1000
 // MARK: - Latency
 
 struct LatencyCard: View {
-    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     let dashboard: Dashboard
+    let series: [Series]
     @Binding var range: GraphRange
+    /// Off while scrolling: the chart holds still under the finger.
+    let animate: Bool
     @State private var hidden: Set<String> = []
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let all = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
+        let all = series
         let shown = all.filter { !hidden.contains($0.target) }
         Card(title: "Latency", accent: palette.color("color.section.latency")) {
             RangePicker(range: $range)
         } content: {
-            LatencyChart(series: shown, now: dashboard.now, range: range)
+            LatencyChart(series: shown, now: dashboard.now, range: range, animate: animate)
                 .frame(height: 190)
                 .overlay {
                     if all.isEmpty {
@@ -134,6 +142,7 @@ private struct LatencyChart: View {
     let series: [Series]
     let now: Double
     let range: GraphRange
+    let animate: Bool
     @Environment(\.palette) private var palette
 
     private struct Plot: Identifiable {
@@ -153,15 +162,11 @@ private struct LatencyChart: View {
         let lonely = Set(Dictionary(grouping: lines, by: \.key).filter { $0.value.count == 1 }.keys)
         Chart {
             ForEach(lines) { p in
-                // A wide, faint stroke under the line reads as a glow on the dark surface.
-                // Monotone: smooth without overshooting a bucket's value.
-                LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Glow", "g" + p.key))
-                    .foregroundStyle(p.color.opacity(0.22))
-                    .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
+                // Monotone: smooth without overshooting a bucket's value. One mark per point: a
+                // second, wider "glow" stroke doubled the work of every animated frame.
                 LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Line", p.key))
                     .foregroundStyle(p.color)
-                    .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
             }
             // A run of one bucket draws no line; a dot keeps fresh or gappy history visible.
@@ -204,16 +209,19 @@ private struct LatencyChart: View {
         .animation(.smooth(duration: 0.4), value: series.map(\.target))
         .animation(.smooth(duration: 0.5), value: yMax)
         // Linear over one refresh interval: the lines glide left continuously, as in gping.
-        .animation(.linear(duration: refreshSeconds), value: now)
+        .animation(animate ? .linear(duration: refreshSeconds) : nil, value: now)
     }
 
+    /// In the unit of the range's gridline step, so 7d reads -1d, not -24h.
     private func axisLabel(_ s: Double) -> String {
         let a = -s
         if a == 0 { return "now" }
-        if a < 120 { return "-\(Int(a))s" }
-        if a < 7200 { return "-\(Int(a / 60))m" }
-        if a < 172_800 { return "-\(Int(a / 3600))h" }
-        return "-\(Int(a / 86_400))d"
+        switch range.axisStep {
+        case ..<60: return "-\(Int(a))s"
+        case ..<3600: return "-\(Int(a / 60))m"
+        case ..<86_400: return "-\(Int(a / 3600))h"
+        default: return "-\(Int(a / 86_400))d"
+        }
     }
 
     /// Room above the busiest line, ignoring its rarest spikes; a round number, so the scale
@@ -302,13 +310,10 @@ struct RangePicker: View {
 // MARK: - Targets
 
 struct TargetGrid: View {
-    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     let dashboard: Dashboard
-    let range: GraphRange
-    @Environment(\.palette) private var palette
+    let series: [Series]
 
     var body: some View {
-        let series = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
         let byTarget = Dictionary(grouping: Set(dashboard.stats.keys).union(dashboard.denied), by: \.target)
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { byTarget[$0] != nil }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {
@@ -423,7 +428,7 @@ private struct Sparkline: View {
         }
         .chartXScale(domain: -series.range.seconds...0)
         .chartPlotStyle { $0.clipped() }
-        .animation(.linear(duration: refreshSeconds), value: series.now)
+        // No scroll animation: six sparklines gliding every second cost more than they showed.
         .chartYScale(domain: 0...top)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
