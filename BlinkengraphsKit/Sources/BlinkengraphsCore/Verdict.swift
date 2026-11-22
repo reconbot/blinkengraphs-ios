@@ -14,7 +14,8 @@ public struct Probe: Codable, Hashable, Sendable {
 
 public enum FaultDomain: String, Codable, Sendable {
     case localLoad = "LocalLoad", lan = "Lan", isp = "Isp", dns = "Dns", remote = "Remote"
-    case icmpFiltering = "IcmpFiltering", selfSaturation = "SelfSaturation", clear = "Clear"
+    case icmpFiltering = "IcmpFiltering", selfSaturation = "SelfSaturation", offline = "Offline"
+    case clear = "Clear"
 }
 
 /// Declared most severe first; `Comparable` sorts in that order.
@@ -47,21 +48,40 @@ public struct VerdictInput: Codable, Sendable {
     /// Metric values keyed by the spec's Windows names (`CpuTotal`, `NetUp`…). iOS fills only `NetUp`.
     public var sample: [String: Double]?
     public var uploadPeakBps: Double
+    /// Whether the OS reports any usable network path; absent in a vector means true.
+    public var pathUp: Bool
 
-    public init(probes: [ProbeStat], sample: [String: Double]? = nil, uploadPeakBps: Double = 0) {
-        self.probes = probes; self.sample = sample; self.uploadPeakBps = uploadPeakBps
+    public init(probes: [ProbeStat], sample: [String: Double]? = nil, uploadPeakBps: Double = 0, pathUp: Bool = true) {
+        self.probes = probes; self.sample = sample; self.uploadPeakBps = uploadPeakBps; self.pathUp = pathUp
     }
 
-    enum CodingKeys: String, CodingKey { case probes, sample, uploadPeakBps = "upload_peak_bps" }
+    enum CodingKeys: String, CodingKey {
+        case probes, sample, uploadPeakBps = "upload_peak_bps", pathUp = "path_up"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        probes = try c.decode([ProbeStat].self, forKey: .probes)
+        sample = try c.decodeIfPresent([String: Double].self, forKey: .sample)
+        uploadPeakBps = try c.decode(Double.self, forKey: .uploadPeakBps)
+        pathUp = try c.decodeIfPresent(Bool.self, forKey: .pathUp) ?? true
+    }
 }
 
 public enum Verdict {
     /// Findings, most severe first. Never empty.
     public static func evaluate(_ input: VerdictInput) -> [Finding] {
-        let network = networkFindings(input)
-        // Rule 1 stops every other network rule, the DNS rule included (vector lan-down).
-        let lanDown = network.first?.domain == .lan && network.first?.severity == .crit
-        var findings = network + (lanDown ? [] : dnsFindings(input)) + localFindings(input.sample)
+        var findings: [Finding]
+        if !input.pathUp {
+            // With no network path, Offline replaces every network and DNS rule.
+            findings = [Finding(domain: .offline, severity: .crit, headline: "No network connection")]
+        } else {
+            let network = networkFindings(input)
+            // Rule 1 stops every other network rule, the DNS rule included (vector lan-down).
+            let lanDown = network.first?.domain == .lan && network.first?.severity == .crit
+            findings = network + (lanDown ? [] : dnsFindings(input))
+        }
+        findings += localFindings(input.sample)
         if findings.isEmpty { return [Finding(domain: .clear, severity: .ok, headline: "All clear")] }
         // Stable: ties keep rule order.
         findings = findings.enumerated()

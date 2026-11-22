@@ -69,6 +69,8 @@ final class Monitor {
     }
 
     private func probeOnce() async {
+        // spec rules/probe-stats.md: no network path, no Probes; the Verdict says Offline.
+        guard path.satisfied else { return refreshVerdict() }
         // Results belong to the Link they were sent on, even if the path changes mid-flight.
         let link = path.link
         let timeout = timeout(intervalMs: defaults.probeGroup.latencyMs)
@@ -88,7 +90,8 @@ final class Monitor {
 
     private func refreshVerdict() {
         stats = linkHistories.stats(on: path.link, windowSeconds: Double(defaults.history.recentWindowS))
-        verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) }))
+        verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) },
+                                                pathUp: path.satisfied))
     }
 
     private func apply(_ state: PathState) {
@@ -119,7 +122,7 @@ final class Monitor {
     }
 
     private func sweepOnce(_ target: String) async {
-        guard let addr = address(of: target) else { return }
+        guard path.satisfied, let addr = address(of: target) else { return }
         let link = path.link
         let cfg = defaults.hopTrace
         var plan = sweepPlans[link]?[target] ?? HopSweepPlan(maxTtl: cfg.maxTtl, fullSweepEveryS: Double(cfg.fullSweepEveryS))

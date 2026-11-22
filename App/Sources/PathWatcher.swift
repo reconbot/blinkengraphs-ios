@@ -5,7 +5,8 @@ import Network
 
 /// What `NWPathMonitor` says about the current route, reduced to what the app shows and uses.
 struct PathState: Equatable, Sendable {
-    var satisfied = false
+    /// Up until NWPathMonitor says otherwise, so launch doesn't flash Offline.
+    var satisfied = true
     var interfaces: [String] = []
     /// BSD name of the preferred interface (en0, pdp_ip0); with the Gateway it names the Link.
     var interfaceName: String?
@@ -33,7 +34,8 @@ struct PathState: Equatable, Sendable {
             case .cellular: "Cellular"
             case .wiredEthernet: "Ethernet"
             case .loopback: "Loopback"
-            default: i.name
+            // utun and ipsec are tunnels: a VPN or iCloud Private Relay.
+            default: i.name.hasPrefix("utun") || i.name.hasPrefix("ipsec") ? "VPN" : i.name
             }
         }
         interfaceName = path.availableInterfaces.first?.name

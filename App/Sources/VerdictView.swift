@@ -20,8 +20,9 @@ struct VerdictView: View {
                 }
                 Section("Connection") {
                     LabeledContent("Path", value: path.satisfied ? "Up" : "Down")
-                    LabeledContent("Via", value: [path.interfaces.first, path.radio].compactMap { $0 }
-                        .joined(separator: " · ").nonEmpty ?? "—")
+                    LabeledContent("Via", value: path.satisfied
+                        ? [path.interfaces.first, path.radio].compactMap { $0 }.joined(separator: " · ").nonEmpty ?? "—"
+                        : "—")
                     LabeledContent("Supports", value: [path.ipv4 ? "IPv4" : nil, path.ipv6 ? "IPv6" : nil,
                                                        path.dns ? "DNS" : nil].compactMap { $0 }
                         .joined(separator: ", ").nonEmpty ?? "—")
