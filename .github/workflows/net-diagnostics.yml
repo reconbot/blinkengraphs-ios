@@ -20,5 +20,13 @@ jobs:
           nc -z -G 3 -w 3 1.1.1.1 443 && echo "tcp 443 ok" || true
           dig +time=2 +tries=1 @1.1.1.1 cloudflare.com A || true
           dig +time=2 +tries=1 cloudflare.com A || true
+      - name: Public address lookup (Cloudflare trace); addresses redacted from the log
+        continue-on-error: true
+        run: |
+          for host in 1.1.1.1 '[2606:4700:4700::1111]'; do
+            echo "== https://$host/cdn-cgi/trace"
+            curl -sS --max-time 5 -w 'http %{http_code}, tls verify %{ssl_verify_result}\n' "https://$host/cdn-cgi/trace" \
+              | sed -E 's/^ip=.*/ip=<redacted>/' || true
+          done
       - name: Unprivileged sockets, the way the app will probe
         run: swift .github/diagnostics/net-probe.swift
