@@ -27,6 +27,7 @@ struct DashboardView: View {
                     ConnectionChips(path: dashboard.path)
                     LatencyCard(dashboard: dashboard, series: series, range: $range, animate: frozen == nil)
                     TargetGrid(dashboard: dashboard, series: series)
+                    PublicAddressCard(readings: dashboard.publicAddress)
                     ForEach(dashboard.hops.keys.sorted(by: Self.ipv4First), id: \.self) { target in
                         HopTraceCard(target: target, rows: dashboard.hops[target] ?? [], names: dashboard.hopNames)
                     }
@@ -245,6 +246,59 @@ private struct ConnectionChips: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(Capsule().fill(palette.card))
             .overlay(Capsule().strokeBorder(tint?.opacity(0.6) ?? palette.cardEdge, lineWidth: 1))
+    }
+}
+
+// MARK: - Public Address
+
+/// spec rules/public-address.md, "Reading the answers".
+private struct PublicAddressCard: View {
+    let readings: [IPFamily: PublicAddressReading]
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Card(title: "Public Address", accent: palette.color("color.section.upload")) {
+            VStack(alignment: .leading, spacing: 10) {
+                row("IPv4", readings[.ipv4], family: "IPv4")
+                row("IPv6", readings[.ipv6], family: "IPv6")
+            }
+        }
+    }
+
+    private func row(_ label: String, _ r: PublicAddressReading?, family: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).font(.caption.weight(.semibold)).foregroundStyle(palette.textWeak).frame(width: 36, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                switch r?.state {
+                case nil:
+                    Text("Looking up…").foregroundStyle(palette.textWeak)
+                case .none?:
+                    Text("No \(family) internet").foregroundStyle(palette.textWeak)
+                case .nat64?:
+                    Text("IPv6-only network with NAT64").foregroundStyle(palette.text)
+                    if let a = r?.address { Text("shared IPv4 \(a)").font(.caption).foregroundStyle(palette.textWeak) }
+                case .agree?:
+                    address(r?.address, asn: r?.asn)
+                case .single?:
+                    address(r?.address, asn: r?.asn)
+                    Text("one source: \(r?.source == .dns ? "DNS" : "HTTPS") only")
+                        .font(.caption).foregroundStyle(palette.textWeak)
+                case .differ?:
+                    Text("DNS \(r?.dns ?? "")").foregroundStyle(palette.text)
+                    Text("HTTPS \(r?.https ?? "")").foregroundStyle(palette.text)
+                    Label("DNS and HTTPS leave by different paths", systemImage: "arrow.triangle.branch")
+                        .font(.caption).foregroundStyle(palette.severity(.warn))
+                }
+            }
+            .font(.callout)
+            .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder private func address(_ a: String?, asn: String?) -> some View {
+        Text(a ?? "").foregroundStyle(palette.text).lineLimit(1).minimumScaleFactor(0.7)
+        if let asn { Text("AS\(asn)").font(.caption).foregroundStyle(palette.textWeak) }
     }
 }
 

@@ -53,6 +53,17 @@ public struct Defaults: Decodable, Sendable {
         }
     }
 
+    /// spec rules/public-address.md
+    public struct PublicAddressDefaults: Decodable, Sendable {
+        public var dnsName: String
+        public var dnsServer: String
+        public var httpsURL: String
+        public var refreshS: Int
+        enum CodingKeys: String, CodingKey {
+            case dnsName = "dns_name", dnsServer = "dns_server", httpsURL = "https_url", refreshS = "refresh_s"
+        }
+    }
+
     public var probeGroup: ProbeGroup
     public var history: History
     public var hopTrace: HopTraceDefaults
@@ -64,11 +75,15 @@ public struct Defaults: Decodable, Sendable {
     public var graphAggregate: Aggregate
     /// What a Probe's latency readout shows until the user picks one (rules/probe-stats.md, "Readouts").
     public var readoutAggregate: Aggregate
+    /// Plain HTTP on purpose: a portal can intercept it (rules/verdict.md, "Captive Portal").
+    public var captivePortalURL: String
+    public var publicAddress: PublicAddressDefaults
 
     enum CodingKeys: String, CodingKey {
         case probeGroup = "probe_group", history, hopTrace = "hop_trace"
         case maxTimeoutMs = "max_timeout_ms", dnsQueryName = "dns_query_name", appearance
         case graphAggregate = "graph_aggregate", readoutAggregate = "readout_aggregate"
+        case captivePortalURL = "captive_portal_url", publicAddress = "public_address"
     }
 
     /// The spec's shared defaults with this platform's `defaults.override.json` merged over them.

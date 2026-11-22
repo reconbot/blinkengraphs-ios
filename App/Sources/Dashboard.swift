@@ -15,4 +15,6 @@ struct Dashboard: Sendable {
     var now: Double = Date().timeIntervalSince1970
     /// Rollups for the longer graphs; nil before any exist.
     var history: RollupHistory?
+    var captivePortal = false
+    var publicAddress: [IPFamily: PublicAddressReading] = [:]
 }

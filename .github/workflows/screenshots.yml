@@ -47,7 +47,7 @@ jobs:
           mkdir -p out
           for look in dark light; do
             xcrun simctl ui "$UDID" appearance "$look"
-            for demo in isp-loss wifi cellular vpn offline; do
+            for demo in isp-loss wifi cellular vpn offline captive; do
               for anchor in top bottom; do
                 xcrun simctl terminate "$UDID" "$bid" 2>/dev/null || true
                 xcrun simctl launch "$UDID" "$bid" -demo "$demo" -anchor "$anchor" -range 15m
@@ -73,7 +73,7 @@ jobs:
         run: |
           python3 - > out/index.md <<'PY'
           scenarios = [("isp-loss", "ISP loss"), ("wifi", "Wi-Fi, all clear"), ("cellular", "5G, IPv6-only"),
-                       ("vpn", "Through a VPN"), ("offline", "Offline")]
+                       ("vpn", "Through a VPN"), ("offline", "Offline"), ("captive", "Captive portal")]
           shots = [("dark", "top"), ("dark", "bottom"), ("light", "top"), ("light", "bottom")]
           out = ["Rendered by CI from the `-demo` scenarios.", "", "<table>",
                  "<tr><th></th>" + "".join(f"<th>{look} · {anchor}</th>" for look, anchor in shots) + "</tr>"]

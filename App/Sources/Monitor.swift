@@ -14,11 +14,16 @@ final class Monitor {
     private(set) var hopNames: [String: String] = [:]
     private var namesRequested: Set<String> = []
     private(set) var results: [Probe: [ProbeResult]] = [:]
+    /// spec rules/verdict.md, "Captive Portal".
+    private(set) var captivePortal = false
+    /// spec rules/public-address.md, per IP version.
+    private(set) var publicAddress: [IPFamily: PublicAddressReading] = [:]
     private(set) var now = Date().timeIntervalSince1970
 
     var dashboard: Dashboard {
         Dashboard(findings: verdict, stats: stats, denied: denied, path: path, hops: hops,
-                  hopNames: hopNames, results: results, now: now, history: history)
+                  hopNames: hopNames, results: results, now: now, history: history,
+                  captivePortal: captivePortal, publicAddress: publicAddress)
     }
 
     /// Minutes older than the RAM History, for the 1h, 24h and 7d graphs.
@@ -39,7 +44,8 @@ final class Monitor {
         linkHistories = LinkHistories(ramSeconds: Double(defaults.history.ramMinutes * 60))
         history = RollupHistory(keepDays: defaults.history.rollupDays)
         files = RollupFiles(keepDays: defaults.history.rollupDays)
-        runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName)]
+        runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName),
+                   SystemDNSProbeRunner(domain: defaults.dnsQueryName)]
     }
 
     func start() {
@@ -59,6 +65,18 @@ final class Monitor {
             while !Task.isCancelled {
                 await self?.probeOnce()
                 try? await Task.sleep(for: .milliseconds(group.latencyMs))
+            }
+        })
+        tasks.append(Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.checkCaptivePortal()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        })
+        tasks.append(Task { [weak self, refresh = defaults.publicAddress.refreshS] in
+            while !Task.isCancelled {
+                await self?.lookUpPublicAddress()
+                try? await Task.sleep(for: .seconds(refresh))
             }
         })
         for target in group.targets where target.trace {
@@ -88,7 +106,8 @@ final class Monitor {
     private func address(of target: String) -> String? {
         switch target {
         case Probe.gateway: return path.gateway
-        case Probe.systemDNS: return nil
+        // The OS resolver needs no address (SystemDNSProbeRunner).
+        case Probe.systemDNS: return "system"
         default:
             let v6 = Probe(target: target, protocol: "").isIPv6 == true
             return (v6 ? path.ipv6 : path.ipv4 || path.ipv6) ? target : nil
@@ -115,6 +134,26 @@ final class Monitor {
         refreshVerdict()
     }
 
+    private func checkCaptivePortal() async {
+        guard path.satisfied else { return }
+        let link = path.link
+        // No answer at all isn't a portal: keep the last known state.
+        guard let portal = await CaptivePortalCheck.run(defaults.captivePortalURL), link == path.link else { return }
+        if portal != captivePortal {
+            captivePortal = portal
+            refreshVerdict()
+        }
+    }
+
+    private func lookUpPublicAddress() async {
+        guard path.satisfied else { return }
+        let link = path.link, config = defaults.publicAddress
+        async let v4 = PublicAddressLookup.run(.ipv4, config)
+        async let v6 = PublicAddressLookup.run(.ipv6, config)
+        let readings = [IPFamily.ipv4: await v4, .ipv6: await v6]
+        if link == path.link { publicAddress = readings }
+    }
+
     /// Once per address, off the main actor; a sweep never waits for it.
     private func lookUpNames(_ addrs: [String]) {
         guard defaults.hopTrace.reverseDns else { return }
@@ -131,7 +170,8 @@ final class Monitor {
         results = linkHistories.results(on: path.link)
         now = Date().timeIntervalSince1970
         verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) },
-                                                pathUp: path.satisfied, viaVPN: path.vpn))
+                                                pathUp: path.satisfied, viaVPN: path.vpn,
+                                                captivePortal: captivePortal))
     }
 
     private func apply(_ state: PathState) {
@@ -141,6 +181,12 @@ final class Monitor {
     }
 
     private func linkChanged() {
+        if captivePortal { captivePortal = false }
+        if !publicAddress.isEmpty { publicAddress = [:] }
+        Task { [weak self] in
+            await self?.checkCaptivePortal()
+            await self?.lookUpPublicAddress()
+        }
         if !denied.isEmpty { denied = [] }
         hops = (traces[path.link] ?? [:]).mapValues(\.table)
         refreshVerdict()

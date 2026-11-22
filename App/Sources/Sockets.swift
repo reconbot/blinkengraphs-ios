@@ -117,6 +117,36 @@ enum Sockets {
         }
     }
 
+    /// The TXT strings answering `name` from `server`, or nil on timeout or a failed send.
+    static func dnsTXT(_ name: String, server: String, timeout: Duration) -> [String]? {
+        guard let dst = Address(server, port: 53) else { return nil }
+        let fd = socket(dst.v6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        let id = UInt16.random(in: .min ... .max)
+        let start = ContinuousClock.now
+        guard send(fd, DNS.query(id: id, name: name, type: DNS.txt), to: dst) else { return nil }
+        while let (bytes, from) = receive(fd, until: start + timeout) {
+            if Address(from, port: 53) == dst, let strings = DNS.txtRecords(bytes, id: id) { return strings }
+        }
+        return nil
+    }
+
+    /// `host`'s first address of one IP version, from the system resolver. Blocks.
+    static func resolve(_ host: String, v6: Bool) -> String? {
+        var hints = addrinfo()
+        hints.ai_family = v6 ? AF_INET6 : AF_INET
+        hints.ai_socktype = SOCK_DGRAM
+        var list: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &list) == 0, let first = list else { return nil }
+        defer { freeaddrinfo(list) }
+        var storage = sockaddr_storage()
+        withUnsafeMutableBytes(of: &storage) { dst in
+            dst.copyMemory(from: UnsafeRawBufferPointer(start: first.pointee.ai_addr, count: Int(first.pointee.ai_addrlen)))
+        }
+        return Address.name(of: storage)
+    }
+
     /// The PTR name for `ip`, or nil when it has none. Blocks on the system resolver.
     static func reverseDNS(_ ip: String) -> String? {
         guard var a = Address(ip, port: 0) else { return nil }
