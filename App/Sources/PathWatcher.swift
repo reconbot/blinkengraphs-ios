@@ -1,3 +1,4 @@
+import BlinkengraphsCore
 import CoreTelephony
 import Foundation
 import Network
@@ -33,7 +34,8 @@ struct PathState: Equatable, Sendable {
         }
         gateway = path.gateways.lazy.compactMap { endpoint -> String? in
             guard case .hostPort(.ipv4(let a), _) = endpoint else { return nil }
-            return a.rawValue.map(String.init).joined(separator: ".")
+            let ip = a.rawValue.map(String.init).joined(separator: ".")
+            return Gateway.isRouter(ip) ? ip : nil
         }.first
         expensive = path.isExpensive
         constrained = path.isConstrained
