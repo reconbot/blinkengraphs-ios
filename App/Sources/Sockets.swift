@@ -50,7 +50,10 @@ enum Sockets {
         }
 
         let seq = sequence()
-        let id = UInt16(truncatingIfNeeded: getpid())
+        // A fresh identifier per echo: if the kernel hands each reply to one socket by identifier,
+        // a shared one (the pid) lets a concurrent sweep socket swallow another Probe's reply.
+        // Device tests showed ICMPv6 Probes losing about 11% only while sweeps ran.
+        let id = UInt16.random(in: 1 ... .max)
         let payload = Array("blinkengraphs".utf8)
         let packet = dst.v6
             ? ICMP6.echoRequest(identifier: id, sequence: seq, payload: payload)
