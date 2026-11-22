@@ -101,7 +101,7 @@ enum Demo: String, CaseIterable {
         }
         // The same nights the Rows skip: 01:00–07:00, ending where the last two hours begin.
         for day in stride(from: first / 86_400 * 86_400, through: last, by: 86_400) {
-            let end = min(day + 7 * 3600, last - 7200 + step)
+            let end = min(day + 7 * 3600, last - 7200)
             if end > day + 3600 { h.add(Pause(begin: Double(day + 3600), end: Double(end))) }
         }
         return h
