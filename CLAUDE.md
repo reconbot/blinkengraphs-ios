@@ -5,7 +5,7 @@ Native Swift/SwiftUI. Scope is in `README.md`: network diagnosis only, no system
 The spec repo, reconbot/blinkengraphs, is the authority, except where an ADR records an iOS departure (ADR 0014). Pin a tagged version, and run its vectors in CI:
 - `CONTEXT.md`: vocabulary. Use its terms in code and UI.
 - `rules/`: Verdict (network half), Probe stats, Hop Trace, Graph aggregate, Defaults.
-- `vectors/`: conformance tests. An implementation conforms when every vector passes.
+- `vectors/`: conformance tests. An implementation conforms when every vector passes, except those an ADR skips by name.
 - `defaults.json`: shared Probe Group, intervals, timeouts, history lengths. `defaults.override.json` here merges over it (`rules/defaults.md`); each override needs an ADR.
 - `tokens/`, `fixtures/`: colors (dark, plus a light palette) and thresholds; data for previews and screenshots.
 - `brand/icon.svg`: the app icon, rendered into the asset catalog at build time.
