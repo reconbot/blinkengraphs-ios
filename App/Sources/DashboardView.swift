@@ -178,6 +178,7 @@ private struct VerdictBanner: View {
         case .selfSaturation: "Upload saturated"
         case .offline: "Offline"
         case .vpn: "VPN"
+        case .captivePortal: "Captive portal"
         case .clear: "All clear"
         }
     }

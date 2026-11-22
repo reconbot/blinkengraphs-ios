@@ -56,11 +56,12 @@ struct Series: Identifiable {
     static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
         let ram = Double(SpecResources.defaults.history.ramMinutes * 60)
+        let rollups = range.usesRollups ? d.history?.rollups : nil
         return targets.enumerated().compactMap { i, target in
             let probe = Probe(target: target, protocol: "icmp"), link = d.path.link
             func make() -> HistoryLine? {
                 HistoryLine.make(span: range.seconds, buckets: range.buckets, now: d.now, aggregate: aggregate,
-                                 ramSeconds: ram, results: d.results[probe], rollups: d.history?.rollups,
+                                 ramSeconds: ram, results: d.results[probe], rollups: rollups,
                                  probe: probe, link: link)
             }
             let line = range.usesRollups
