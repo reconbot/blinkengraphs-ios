@@ -11,19 +11,36 @@ struct BlinkengraphsApp: App {
     @AppStorage(Appearance.storageKey) private var appearance = SpecResources.defaults.appearance
     /// `-demo <name>` shows a fixed scenario instead of measuring (screenshots, previews).
     private let demo = Demo.fromLaunchArguments?.dashboard()
+    /// `-capture YES`: render every CI screenshot in this one launch (ScreenshotRun).
+    @State private var shots = ScreenshotRun.requested ? ScreenshotRun() : nil
 
     var body: some Scene {
         WindowGroup {
-            DashboardView(dashboard: demo ?? monitor.dashboard)
-                .onAppear { apply(appearance) }
-                .onChange(of: appearance) { _, new in apply(new) }
-                .onChange(of: probeGroup) { _, json in monitor.setProbeGroup(ProbeGroupSetting.decode(json)) }
+            if let shots {
+                // The run lives on the container: the view inside is replaced for every shot.
+                ZStack {
+                    // A fresh view per shot, so its scroll anchor and range apply from the start.
+                    DashboardView(dashboard: shots.dashboard, anchorBottom: shots.current?.bottom ?? false)
+                        .id(shots.current?.name)
+                }
+                .task { await shots.run() }
+            } else {
+                dashboard
+            }
         }
         // Foreground-only diagnosis: iOS suspends us in the background anyway.
         .onChange(of: phase) { _, phase in
-            guard demo == nil else { return }
+            guard demo == nil, shots == nil else { return }
             if phase == .active { monitor.start() } else { monitor.stop() }
         }
+    }
+
+    private var dashboard: some View {
+        DashboardView(dashboard: demo ?? monitor.dashboard)
+                .onAppear { apply(appearance) }
+                .onChange(of: appearance) { _, new in apply(new) }
+                .onChange(of: probeGroup) { _, json in monitor.setProbeGroup(ProbeGroupSetting.decode(json)) }
+                .task { if demo != nil { await Demo.signalReady() } }
     }
 
     /// Set on the window, not with `preferredColorScheme`: that one didn't reach an open sheet,

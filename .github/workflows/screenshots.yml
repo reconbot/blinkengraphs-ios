@@ -9,24 +9,33 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer push supersedes a PR's run. On main every commit's run finishes: a release's notes wait
+# for its commit's screenshots, and cancelling them left v1.0.0 without any.
 concurrency:
-  group: screenshots-${{ github.ref }}
-  cancel-in-progress: true
+  group: screenshots-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   render:
     runs-on: macos-latest
+    # A boot that never finishes must not hold a runner for GitHub's 6-hour default.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: true
       - run: brew install xcodegen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
       - run: xcodegen generate
       - name: Pick an iPhone simulator
         run: |
           udid=$(xcrun simctl list devices available -j \
-            | jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[]
-                      | select(.name | test("^iPhone [0-9]+ Pro$"))] | last | .udid')
+            | jq -r '[.devices | to_entries[] | select(.key | test("iOS"))
+                      # Newest runtime by version: `last` in key order picked 26.2 over 26.5.
+                      | (.key | capture("iOS-(?<a>[0-9]+)-(?<b>[0-9]+)") | [(.a|tonumber), (.b|tonumber)]) as $v
+                      | .value[] | select(.name | test("^iPhone [0-9]+ Pro$")) | {v: $v, udid}]
+                      | sort_by(.v) | last | .udid')
           echo "UDID=$udid" >> "$GITHUB_ENV"
           xcrun simctl list devices | grep "$udid"
       - name: Build for the simulator
@@ -37,37 +46,43 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
       - name: Capture
         run: |
+          t() { echo "::notice::$(date +%T) $*"; }
           app=build/Build/Products/Debug-iphonesimulator/Blinkengraphs.app
           bid=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
-          xcrun simctl boot "$UDID" || true
-          xcrun simctl bootstatus "$UDID" -b
-          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
-            --wifiBars 3 --cellularBars 4 --dataNetwork wifi
+          # After the build, not during it: the first boot's data migration slowed the build from 42 s to 4m41s.
+          # First-boot jobs off (.github/simulator-quiet-jobs.txt): they kept the runner busy for minutes.
+          quiet=()
+          while IFS= read -r label; do
+            label="${label%%#*}"; label="${label//[[:space:]]/}"
+            [ -n "$label" ] && quiet+=("--disabledJob=$label")
+          done < .github/simulator-quiet-jobs.txt
+          # Bounded: with the first-boot jobs off, a boot on the iOS 26.5 runtime once never finished.
+          # macOS has no `timeout`; perl's alarm ends bootstatus after the limit.
+          bounded() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+          xcrun simctl boot "$UDID" "${quiet[@]}" || true
+          if ! bounded 240 xcrun simctl bootstatus "$UDID" -b > bootstatus.log 2>&1; then
+            echo "::warning::Quiet boot didn't finish in 4 min; booting with every job. It was waiting on: $(grep -v '^$' bootstatus.log | tail -3 | tr '\n' ' ')"
+            xcrun simctl shutdown "$UDID" || true
+            xcrun simctl boot "$UDID"
+            xcrun simctl bootstatus "$UDID" -b >/dev/null
+          fi
+          t booted
           xcrun simctl install "$UDID" "$app"
+          t install
+          docs="$(xcrun simctl get_app_container "$UDID" "$bid" data)/Documents"
+          t installed
           mkdir -p out
-          for look in dark light; do
-            xcrun simctl ui "$UDID" appearance "$look"
-            for demo in isp-loss wifi cellular vpn offline captive; do
-              for anchor in top bottom; do
-                xcrun simctl terminate "$UDID" "$bid" 2>/dev/null || true
-                xcrun simctl launch "$UDID" "$bid" -demo "$demo" -anchor "$anchor" -range 15m
-                sleep 4
-                xcrun simctl io "$UDID" screenshot "out/$demo-$look-$anchor.png"
-                # Half size: still sharp on a PR, a quarter of the bytes on the branch.
-                sips -Z 1311 "out/$demo-$look-$anchor.png" >/dev/null
-              done
-            done
-          done
-          # The longer graph ranges, from the demo week of Rollups.
-          for shot in "isp-loss dark 1h" "isp-loss dark 24h" "wifi light 7d"; do
-            set -- $shot
-            xcrun simctl ui "$UDID" appearance "$2"
-            xcrun simctl terminate "$UDID" "$bid" 2>/dev/null || true
-            xcrun simctl launch "$UDID" "$bid" -demo "$1" -anchor top -range "$3"
-            sleep 4
-            xcrun simctl io "$UDID" screenshot "out/range-$3-$1-$2.png"
-            sips -Z 1311 "out/range-$3-$1-$2.png" >/dev/null
-          done
+          # One launch renders every shot in-process (App/Sources/ScreenshotRun.swift): relaunching and
+          # `simctl io screenshot` cost 5–25 s a shot while the new simulator was still busy.
+          shots="$docs/shots"
+          xcrun simctl launch "$UDID" "$bid" -capture YES >/dev/null
+          for _ in $(seq 600); do [ -f "$shots/done" ] && break; sleep 0.5; done
+          [ -f "$shots/done" ] || { echo "::error::The capture run didn't finish in 5 min"; ls "$shots"; exit 1; }
+          t captured
+          cp "$shots"/*.png out/
+          # Half size: still sharp on a PR, a quarter of the bytes on the branch. One pass, after capture.
+          sips -Z 1311 out/*.png >/dev/null
+          t resized
           sips -Z 256 App/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out out/app-icon.png >/dev/null
       - name: Index
         run: |
