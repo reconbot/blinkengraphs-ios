@@ -10,3 +10,7 @@ Device tests on a 5G carrier, 2026-11-22. `NWPath` reported `supportsIPv4 == fal
 | TTL-limited ICMP (Hop Trace), first hops | No answers. Likely: routers before the carrier's NAT64 are IPv6-only, and their time-exceeded replies can't be translated back to IPv4 (unconfirmed) |
 
 Apple's App Review tests on IPv6-only NAT64 networks, which may lack the device-side 464XLAT translator; IPv4 sockets would then fail. Still to verify before an App Store release.
+
+## Response
+
+The spec now carries IPv6 Targets (Cloudflare `2606:4700:4700::1111`, Quad9 `2620:fe::fe`) and skips a Target whose IP version the path can't reach. The app probes IPv6 Targets when `NWPath.supportsIPv6`, and IPv4 Targets when the path has IPv4 or IPv6 that may be translated; an IPv4 send that fails with no route is `unreachable`, not lost. On IPv6-only cellular, the IPv6 Hop Trace should show the carrier's routers that the IPv4 one couldn't.

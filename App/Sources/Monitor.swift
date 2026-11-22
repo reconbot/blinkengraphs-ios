@@ -59,12 +59,16 @@ final class Monitor {
         .milliseconds(defaults.probeTimeoutMs(intervalMs: intervalMs))
     }
 
-    /// The Target's IPv4 address, or nil when it can't be probed right now.
+    /// The Target's address, or nil when it can't be probed on this path right now.
+    /// IPv6 Targets need IPv6 on the path. IPv4 ones need IPv4, or IPv6 that iOS may translate
+    /// (464XLAT); a send that then finds no route reports `unreachable`.
     private func address(of target: String) -> String? {
         switch target {
-        case Probe.gateway: path.gateway
-        case Probe.systemDNS: nil
-        default: target
+        case Probe.gateway: return path.gateway
+        case Probe.systemDNS: return nil
+        default:
+            let v6 = Probe(target: target, protocol: "").isIPv6 == true
+            return (v6 ? path.ipv6 : path.ipv4 || path.ipv6) ? target : nil
         }
     }
 
@@ -116,6 +120,8 @@ final class Monitor {
             // rules/probe-stats.md: not a loss and not recorded; shown outside the Verdict.
             if link == path.link { denied.insert(probe) }
             return
+        case .unreachable:
+            return
         }
         if link == path.link { denied.remove(probe) }
         linkHistories.record(probe, ProbeResult(at: at, rttMs: rtt), on: link)
@@ -131,19 +137,22 @@ final class Monitor {
         sweepPlans[link, default: [:]][target] = plan
 
         let timeout = timeout(intervalMs: defaults.probeGroup.traceMs)
-        let results = await withTaskGroup(of: HopResult.self) { group in
+        // A sweep whose sends find no route records nothing: the path can't reach this IP version.
+        let results = await withTaskGroup(of: HopResult?.self) { group in
             for ttl in ttls {
                 group.addTask {
                     switch await offPool({ Sockets.echo(to: addr, ttl: Int32(ttl), timeout: timeout) }) {
                     case .reply(let from, let kind, let ms):
                         HopResult(ttl: ttl, addr: from, rttMs: ms, reached: kind == .echoReply)
+                    case .sendFailed(let e) where noRoute(e):
+                        nil
                     case .timeout, .sendFailed:
                         HopResult(ttl: ttl, addr: nil, rttMs: nil, reached: false)
                     }
                 }
             }
             var results: [HopResult] = []
-            for await r in group { results.append(r) }
+            for await r in group { if let r { results.append(r) } }
             return results
         }
         // Highest TTL first: past the Target every TTL is `reached`, and the lowest reached one,

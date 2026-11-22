@@ -7,7 +7,12 @@ enum ProbeOutcome: Sendable {
     case lost
     /// The OS refused to send it, e.g. Local Network Privacy. Not a loss.
     case denied
+    /// The path can't reach this Target's IP version. Not sent, not a loss (spec rules/probe-stats.md).
+    case unreachable
 }
+
+/// A send that fails because no route exists for the Target's IP version.
+func noRoute(_ e: Int32) -> Bool { e == ENETUNREACH || e == EAFNOSUPPORT || e == EADDRNOTAVAIL }
 
 protocol ProbeRunner: Sendable {
     func handles(_ probe: Probe) -> Bool
@@ -30,6 +35,7 @@ struct ICMPProbeRunner: ProbeRunner {
         case .reply(_, .echoReply, let ms): return .reply(ms: ms)
         // Local Network Privacy gates TCP and UDP, not ICMP: a device test pinged the Gateway
         // with no prompt (docs/research/local-network-privacy.md). A failed send is a loss.
+        case .sendFailed(let e) where noRoute(e): return .unreachable
         case .reply, .timeout, .sendFailed: return .lost
         }
     }
@@ -49,6 +55,7 @@ struct DNSProbeRunner: ProbeRunner {
         case .timeout: return .lost
         // UDP to a LAN address is gated (TN3179), but Apple names no errno for a denied send;
         // EHOSTUNREACH and EPERM are the assumption, and only the Gateway is on the LAN.
+        case .sendFailed(let e) where noRoute(e): return .unreachable
         case .sendFailed(let e):
             return probe.target == Probe.gateway && (e == EHOSTUNREACH || e == EPERM) ? .denied : .lost
         }
@@ -63,6 +70,7 @@ struct TCPProbeRunner: ProbeRunner {
         guard let port = UInt16(probe.protocol.dropFirst(4)) else { return .lost }
         switch await offPool({ Sockets.tcpConnect(to: address, port: port, timeout: timeout) }) {
         case .connected(let ms): return .reply(ms: ms)
+        case .failed(let e) where noRoute(e): return .unreachable
         case .timeout, .failed: return .lost
         }
     }
