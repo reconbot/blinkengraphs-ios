@@ -36,11 +36,12 @@ struct Series: Identifiable {
     /// A bucket's middle against `now`: negative seconds, sliding left as time passes.
     func x(_ p: GraphPoint) -> Double { p.start + range.bucketWidth / 2 - now }
 
-    /// Over the whole range, for the legend.
-    var p50: Double?
+    /// Over the whole range, for the legend, in the chosen aggregate.
+    var summary: Double?
+    var aggregate: Aggregate
     var loss: Double
 
-    static func all(_ d: Dashboard, range: GraphRange, palette: Palette) -> [Series] {
+    static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { $0 != Probe.systemDNS }
         return targets.enumerated().compactMap { i, target in
             let probe = Probe(target: target, protocol: "icmp")
@@ -52,9 +53,9 @@ struct Series: Identifiable {
                 target: target, probe: probe, color: palette.series(i),
                 // One bucket more on the left, so the line runs to the edge as it scrolls.
                 points: GraphBuckets.points(results, from: window.lowerBound - range.bucketWidth,
-                                            to: window.upperBound, count: range.buckets + 1, aggregate: .p50),
+                                            to: window.upperBound, count: range.buckets + 1, aggregate: aggregate),
                 now: d.now, range: range,
-                p50: Aggregate.p50.value(ofSamples: replies),
+                summary: aggregate.value(ofSamples: replies), aggregate: aggregate,
                 loss: inRange.isEmpty ? 0 : 1 - Double(replies.count) / Double(inRange.count))
         }
     }
@@ -66,13 +67,14 @@ let refreshSeconds = Double(SpecResources.defaults.probeGroup.latencyMs) / 1000
 // MARK: - Latency
 
 struct LatencyCard: View {
+    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     let dashboard: Dashboard
     @Binding var range: GraphRange
     @State private var hidden: Set<String> = []
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let all = Series.all(dashboard, range: range, palette: palette)
+        let all = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
         let shown = all.filter { !hidden.contains($0.target) }
         Card(title: "Latency", accent: palette.color("color.section.latency")) {
             RangePicker(range: $range)
@@ -227,7 +229,7 @@ private struct LegendRow: View {
                 .foregroundStyle(hidden ? palette.textWeak : palette.text)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 6)
-            Text("p50 \(ms(series.p50)) ms").foregroundStyle(palette.text)
+            Text("\(series.aggregate.label) \(ms(series.summary)) ms").foregroundStyle(palette.text)
             Text(percent(series.loss))
                 .foregroundStyle(percent(series.loss) != "0%" ? palette.loss : palette.textWeak)
                 .frame(width: 38, alignment: .trailing)
@@ -264,12 +266,13 @@ struct RangePicker: View {
 // MARK: - Targets
 
 struct TargetGrid: View {
+    @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     let dashboard: Dashboard
     let range: GraphRange
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let series = Series.all(dashboard, range: range, palette: palette)
+        let series = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
         let byTarget = Dictionary(grouping: Set(dashboard.stats.keys).union(dashboard.denied), by: \.target)
         let targets = SpecResources.defaults.probeGroup.targets.map(\.target).filter { byTarget[$0] != nil }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 12)], spacing: 12) {

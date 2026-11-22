@@ -1,7 +1,7 @@
 // rules/graph-aggregate.md. Exact arithmetic only, so results match vectors/sketch bit for bit.
 
 /// What a history graph point shows when it covers several samples.
-public enum Aggregate: String, CaseIterable, Sendable {
+public enum Aggregate: String, CaseIterable, Codable, Sendable {
     case p50, p95, p99, avg, max
 
     /// For raw samples from the recent RAM history: the same rank on the sorted values, no histogram.
