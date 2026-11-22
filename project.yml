@@ -36,7 +36,8 @@ targets:
         buildPhase: resources
     preBuildScripts:
       - name: Render app icon from the spec
-        script: swift "$SRCROOT/scripts/render-icon.swift" "$SRCROOT/spec/brand/icon.svg" "$SRCROOT/spec/tokens/blinkengraphs.tokens.json" "$SRCROOT/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+        # A clean environment: the build's SDKROOT would point swift at the iOS SDK.
+        script: /usr/bin/env -i PATH=/usr/bin:/bin HOME="$HOME" DEVELOPER_DIR="$DEVELOPER_DIR" xcrun --sdk macosx swift "$SRCROOT/scripts/render-icon.swift" "$SRCROOT/spec/brand/icon.svg" "$SRCROOT/spec/tokens/blinkengraphs.tokens.json" "$SRCROOT/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
         inputFiles:
           - $(SRCROOT)/spec/brand/icon.svg
           - $(SRCROOT)/spec/tokens/blinkengraphs.tokens.json
