@@ -100,9 +100,9 @@ private struct HopRowView: View {
     path.interfaces = ["Wi-Fi"]
     path.gateway = "192.168.1.1"
     return VerdictView(
-        findings: [Finding(domain: .isp, severity: .crit, headline: "Gateway OK, 8.8.8.8 losing 23%: ISP problem")],
+        findings: [Finding(domain: .isp, severity: .crit, headline: "Gateway OK, 9.9.9.9 losing 23%: ISP problem")],
         probes: [
-            Probe(target: "8.8.8.8", protocol: "tcp:443"): ProbeStats(loss: 0.23, rttMs: 95, baselineMs: 19, jitterMs: 14),
+            Probe(target: "9.9.9.9", protocol: "tcp:443"): ProbeStats(loss: 0.23, rttMs: 95, baselineMs: 19, jitterMs: 14),
         ],
         denied: [Probe(target: "gateway", protocol: "icmp")],
         path: path,

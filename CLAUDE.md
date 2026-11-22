@@ -6,7 +6,7 @@ The spec repo, reconbot/blinkengraphs, is the authority. Pin a tagged version, a
 - `CONTEXT.md`: vocabulary. Use its terms in code and UI.
 - `rules/`: Verdict (network half), Probe stats, Hop Trace.
 - `vectors/`: conformance tests. An implementation conforms when every vector passes.
-- `defaults.json`: Probe Group, intervals, timeouts, history lengths.
+- `defaults.json`: shared Probe Group, intervals, timeouts, history lengths. `defaults.override.json` here merges over it (`rules/defaults.md`); each override needs an ADR.
 - `tokens/`, `fixtures/`: colors and thresholds; data for previews and screenshots.
 
 Changes that touch more than one repo follow the spec's `docs/sync.md`: bump the pinned spec tag in a PR whenever the spec releases.

@@ -7,7 +7,7 @@ A network diagnosis tool for iPhone and iPad: live latency, DNS, path state and 
 ## Scope
 
 - Foreground diagnosis:
-  - latency to the Gateway, 1.1.1.1 and 8.8.8.8
+  - latency to the Gateway, 1.1.1.1 and 9.9.9.9
   - DNS timing
   - `NWPathMonitor` path state
   - a hop trace
@@ -49,6 +49,7 @@ swift test --package-path BlinkengraphsKit
 | Path | Contents |
 |---|---|
 | `spec/` | The spec, pinned to a release tag as a git submodule |
+| `defaults.override.json` | This platform's overrides of the spec's shared defaults |
 | `BlinkengraphsKit/` | `BlinkengraphsCore`: Probe stats, Hop Trace, Meters, Verdict. Foundation only |
 | `App/` | The SwiftUI app: probing and UI |
 | `project.yml` | XcodeGen project spec; the `.xcodeproj` is generated |

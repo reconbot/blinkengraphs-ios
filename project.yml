@@ -23,6 +23,9 @@ targets:
       # Bundled from the pinned spec so defaults and colors match every platform.
       - path: spec/defaults.json
         buildPhase: resources
+      # This platform's overrides, merged over the spec's defaults (spec rules/defaults.md).
+      - path: defaults.override.json
+        buildPhase: resources
       - path: spec/tokens/blinkengraphs.tokens.json
         buildPhase: resources
     dependencies:
