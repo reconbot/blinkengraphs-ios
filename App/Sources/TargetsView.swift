@@ -114,6 +114,13 @@ private struct TargetEditor: View {
         Defaults.Target.isValid(row.target) && (!tcpOn || UInt16(tcp).map { $0 > 0 } == true)
     }
 
+    /// What a DNS Probe sends (ProbeRunner.swift, Lookups.swift), so the toggle names its transport.
+    private var dnsDetail: String {
+        let name = SpecResources.defaults.dnsQueryName
+        return row.target.trimmingCharacters(in: .whitespaces).lowercased() == Probe.systemDNS
+            ? "System resolver, a random name under \(name)" : "UDP 53, asks for \(name)"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -146,7 +153,10 @@ private struct TargetEditor: View {
                                 .frame(maxWidth: 100)
                         }
                     }
-                    Toggle("DNS", isOn: $row.dns)
+                    Toggle(isOn: $row.dns) {
+                        Text("DNS")
+                        Text(dnsDetail)
+                    }
                     Toggle("Hop Trace", isOn: $row.trace).disabled(!row.traceable)
                 }
             }
