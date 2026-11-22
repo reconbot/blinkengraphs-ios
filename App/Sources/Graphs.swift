@@ -101,17 +101,22 @@ private struct LatencyChart: View {
     var body: some View {
         let yMax = yMax
         let (lines, dots) = plots(yMax: yMax)
+        let lonely = Set(Dictionary(grouping: lines, by: \.key).filter { $0.value.count == 1 }.keys)
         Chart {
             ForEach(lines) { p in
                 // A wide, faint stroke under the line reads as a glow on the dark surface.
                 LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Glow", "g" + p.key))
                     .foregroundStyle(p.color.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
                 LineMark(x: .value("Time", p.x), y: .value("ms", p.y), series: .value("Line", p.key))
                     .foregroundStyle(p.color)
                     .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
+            }
+            // A run of one bucket draws no line; a dot keeps fresh or gappy history visible.
+            ForEach(lines.filter { lonely.contains($0.key) }) { p in
+                PointMark(x: .value("Time", p.x), y: .value("ms", p.y))
+                    .foregroundStyle(p.color)
+                    .symbolSize(18)
             }
             // Loss as a strip along the floor, one tick per bucket at its worst Target's loss:
             // per-line dots buried the lines whenever every Target was losing.
@@ -335,6 +340,15 @@ private struct Sparkline: View {
             }
         }
         .chartXScale(domain: 0...max(series.points.count - 1, 1))
+        .overlay {
+            // One reply so far draws no line: show it as a dot at the right edge.
+            if values.count == 1, let v = values.first {
+                GeometryReader { g in
+                    Circle().fill(series.color).frame(width: 5, height: 5)
+                        .position(x: g.size.width - 3, y: g.size.height * (1 - v / top))
+                }
+            }
+        }
         .chartYScale(domain: 0...top)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
