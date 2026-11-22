@@ -14,9 +14,9 @@ struct SystemDNSProbeRunner: ProbeRunner {
 
     func handles(_ probe: Probe) -> Bool { probe.target == Probe.systemDNS && probe.protocol == "dns" }
 
-    func run(_ probe: Probe, address: String, timeout: Duration) async -> ProbeOutcome {
+    func run(_ probe: Probe, address: String, interface: UInt32, timeout: Duration) async -> ProbeOutcome {
         let label = String((0..<12).map { _ in "abcdefghijklmnopqrstuvwxyz0123456789".randomElement()! })
-        return await SystemResolver.lookup("\(label).\(domain)", timeout: timeout)
+        return await SystemResolver.lookup("\(label).\(domain)", interface: interface, timeout: timeout)
     }
 }
 
@@ -39,7 +39,8 @@ private enum SystemResolver {
         }
     }
 
-    static func lookup(_ name: String, timeout: Duration) async -> ProbeOutcome {
+    /// A non-zero `interface` asks only that interface's resolvers (dns_sd.h, interfaceIndex).
+    static func lookup(_ name: String, interface: UInt32, timeout: Duration) async -> ProbeOutcome {
         await withCheckedContinuation { continuation in
             queue.async {
                 let lookup = Lookup()
@@ -47,7 +48,7 @@ private enum SystemResolver {
                 let context = Unmanaged.passRetained(lookup).toOpaque()
                 // ReturnIntermediates: without it an NXDOMAIN gets no callback at all.
                 let error = DNSServiceGetAddrInfo(&lookup.ref, DNSServiceFlags(kDNSServiceFlagsReturnIntermediates),
-                                                  0, 0, name, { _, _, _, error, _, _, _, context in
+                                                  interface, 0, name, { _, _, _, error, _, _, _, context in
                     let lookup = Unmanaged<Lookup>.fromOpaque(context!).takeUnretainedValue()
                     let answered = [kDNSServiceErr_NoError, kDNSServiceErr_NoSuchRecord, kDNSServiceErr_NoSuchName]
                         .contains(Int(error))

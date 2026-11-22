@@ -65,11 +65,7 @@ struct PathState: Equatable, Sendable {
         }
         interfaceName = path.availableInterfaces.first?.name
         vpn = interfaceName.map { $0.hasPrefix("utun") || $0.hasPrefix("ipsec") } ?? false
-        gateway = path.gateways.lazy.compactMap { endpoint -> String? in
-            guard case .hostPort(.ipv4(let a), _) = endpoint else { return nil }
-            let ip = a.rawValue.map(String.init).joined(separator: ".")
-            return Gateway.isRouter(ip) ? ip : nil
-        }.first
+        gateway = Self.gateway(of: path)
         expensive = path.isExpensive
         constrained = path.isConstrained
         ipv4 = path.supportsIPv4
@@ -84,6 +80,15 @@ struct PathState: Equatable, Sendable {
             }
         }
         if path.usesInterfaceType(.cellular) { radio = Self.currentRadio() }
+    }
+
+    /// The path's IPv4 Gateway, when it is a router (not a 464XLAT translator).
+    static func gateway(of path: NWPath) -> String? {
+        path.gateways.lazy.compactMap { endpoint -> String? in
+            guard case .hostPort(.ipv4(let a), _) = endpoint else { return nil }
+            let ip = a.rawValue.map(String.init).joined(separator: ".")
+            return Gateway.isRouter(ip) ? ip : nil
+        }.first
     }
 
     /// The data SIM's radio technology. Cell ID and signal strength have no public API.
@@ -113,4 +118,41 @@ final class PathWatcher: Sendable {
     }
 
     func stop() { monitor.cancel() }
+}
+
+/// One active Link besides the default route, as its own typed path monitor sees it.
+struct LinkPath: Equatable, Sendable {
+    enum Kind: String, Sendable { case wifi = "Wi-Fi", cellular = "Cellular", wired = "Ethernet" }
+    var kind: Kind
+    var link: Link
+    /// For IP_BOUND_IF: Probes on this Link leave through this interface.
+    var index: UInt32
+    var gateway: String?
+    var ipv4: Bool
+    var ipv6: Bool
+}
+
+/// Watches each interface type on its own (docs/research/multi-link-probing.md, section 3), so
+/// cellular is seen while Wi-Fi carries the default route.
+final class LinkWatcher: Sendable {
+    private let monitors: [(LinkPath.Kind, NWPathMonitor)] = [
+        (.wifi, NWPathMonitor(requiredInterfaceType: .wifi)),
+        (.cellular, NWPathMonitor(requiredInterfaceType: .cellular)),
+        (.wired, NWPathMonitor(requiredInterfaceType: .wiredEthernet)),
+    ]
+
+    /// Reports each kind's Link, or nil when that kind has no working path.
+    func start(_ onChange: @escaping @Sendable (LinkPath.Kind, LinkPath?) -> Void) {
+        for (kind, monitor) in monitors {
+            monitor.pathUpdateHandler = { path in
+                guard path.status == .satisfied, let i = path.availableInterfaces.first else { return onChange(kind, nil) }
+                let gateway = PathState.gateway(of: path)
+                onChange(kind, LinkPath(kind: kind, link: Link(interface: i.name, gateway: gateway), index: UInt32(i.index),
+                                        gateway: gateway, ipv4: path.supportsIPv4, ipv6: path.supportsIPv6))
+            }
+            monitor.start(queue: DispatchQueue(label: "blinkengraphs.link.\(kind.rawValue)"))
+        }
+    }
+
+    func stop() { monitors.forEach { $0.1.cancel() } }
 }

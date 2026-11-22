@@ -36,6 +36,15 @@ final class Monitor {
     @ObservationIgnored private var resolved: [String: (address: String?, at: Double)] = [:]
     @ObservationIgnored private let runners: [any ProbeRunner]
     @ObservationIgnored private var pathWatcher: PathWatcher?
+    @ObservationIgnored private var linkWatcher: LinkWatcher?
+    /// Every working Link by kind, the default-route one included.
+    @ObservationIgnored private var linkPaths: [LinkPath.Kind: LinkPath] = [:]
+    /// Each Link besides the default route waits out its own settle after it appears or changes.
+    @ObservationIgnored private var linkSettles: [LinkPath.Kind: PathSettle] = [:]
+    /// Which interface the OS routes each Target address through, for a VPN's split tunnel.
+    @ObservationIgnored private var routes: [String: (interface: String?, at: Double)] = [:]
+    /// Settings → "Measure cellular while on Wi-Fi": it spends the user's data plan.
+    static let measureCellularKey = "measureCellular"
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     /// Probes wait for the path to settle after a network change (ADR 0013). One second is a
     /// first guess, to tune from what devices show.
@@ -77,6 +86,11 @@ final class Monitor {
         let watcher = PathWatcher()
         watcher.start { [weak self] state in Task { @MainActor in self?.apply(state) } }
         pathWatcher = watcher
+        linkPaths = [:]
+        linkSettles = [:]
+        let links = LinkWatcher()
+        links.start { [weak self] kind, path in Task { @MainActor in self?.apply(kind, path) } }
+        linkWatcher = links
 
         let group = self.group
         rounds(every: Double(group.latencyMs) / 1000)
@@ -106,6 +120,8 @@ final class Monitor {
         tasks = []
         pathWatcher?.stop()
         pathWatcher = nil
+        linkWatcher?.stop()
+        linkWatcher = nil
         // A Round still in flight is cut by this Pause and records nothing. The Pause reaches
         // disk now: iOS may end the suspended app without running any more of its code.
         let now = Date().timeIntervalSince1970
@@ -190,12 +206,39 @@ final class Monitor {
         .milliseconds(defaults.probeTimeoutMs(intervalMs: intervalMs))
     }
 
-    /// The Target's address, or nil when it can't be probed on this path right now.
-    /// IPv6 Targets need IPv6 on the path. IPv4 ones need IPv4, or IPv6 that iOS may translate
-    /// (464XLAT); a send that then finds no route reports `unreachable`.
-    private func address(of target: String) -> String? {
+    /// A Link Probes run on: the default route, unbound so it goes wherever the OS sends
+    /// traffic, or another active Link, pinned to its interface.
+    private struct Measured {
+        var link: Link
+        var interface: UInt32
+        var gateway: String?
+        var ipv4: Bool
+        var ipv6: Bool
+        var isDefault: Bool
+    }
+
+    /// The default-route Link, then each other working Link: cellular only when the user turned
+    /// it on, since it spends their data plan.
+    private var measured: [Measured] {
+        guard path.satisfied else { return [] }
+        let now = Date().timeIntervalSince1970
+        let cellular = UserDefaults.standard.bool(forKey: Self.measureCellularKey)
+        var out = [Measured(link: path.link, interface: 0, gateway: path.gateway, ipv4: path.ipv4, ipv6: path.ipv6, isDefault: true)]
+        for kind in [LinkPath.Kind.wifi, .wired, .cellular] {
+            guard let l = linkPaths[kind], l.link.interface != path.interfaceName,
+                  kind != .cellular || cellular, linkSettles[kind]?.ready(at: now) == true else { continue }
+            out.append(Measured(link: l.link, interface: l.index, gateway: l.gateway, ipv4: l.ipv4, ipv6: l.ipv6, isDefault: false))
+        }
+        return out
+    }
+
+    /// The Target's address on `m`, or nil when it can't be probed there right now.
+    /// IPv6 Targets need IPv6 on the Link. IPv4 ones need IPv4, or IPv6 that iOS may translate
+    /// (464XLAT); a send that then finds no route reports `unreachable`. Through a VPN, a Target
+    /// the tunnel doesn't route records nothing (spec rules/probe-stats.md).
+    private func address(of target: String, on m: Measured) -> String? {
         switch target {
-        case Probe.gateway: return path.gateway
+        case Probe.gateway: return m.gateway
         // The OS resolver needs no address (SystemDNSProbeRunner).
         case Probe.systemDNS: return "system"
         default:
@@ -203,8 +246,20 @@ final class Monitor {
             let literal = Probe(target: target, protocol: "").isIPv6 != nil
             guard let address = literal ? target : resolved[target]?.address else { return nil }
             let v6 = address.contains(":")
-            return (v6 ? path.ipv6 : path.ipv4 || path.ipv6) ? address : nil
+            guard v6 ? m.ipv6 : m.ipv4 || m.ipv6 else { return nil }
+            if m.isDefault, path.vpn, let route = routes[address], route.interface != path.interfaceName { return nil }
+            return address
         }
+    }
+
+    /// Through a VPN, which interface each Target address leaves by; checked every 30 s.
+    private func refreshRoutes() async {
+        guard path.vpn else { return routes = [:] }
+        let nowS = Date().timeIntervalSince1970
+        let addresses = group.targets.compactMap { t -> String? in
+            Probe(target: t.target, protocol: "").isIPv6 != nil ? t.target : resolved[t.target]?.address
+        }.filter { nowS - (routes[$0]?.at ?? -.infinity) >= 30 }
+        for a in addresses { routes[a] = (await offPool { Sockets.routeInterface(to: a) }, nowS) }
     }
 
     /// Resolves name Targets that are new or older than 30 s, preferring IPv6 when the path has it.
@@ -239,28 +294,49 @@ final class Monitor {
         // A path that hasn't settled isn't measured yet (ADR 0013).
         guard path.satisfied, settled else { return publish() }
         await refreshNames()
-        // Results belong to the Link they were sent on, even if the path changes mid-flight.
-        let link = path.link
+        await refreshRoutes()
+        let links = measured
+        measurements.setActiveLinks(links.map(\.link))
         let timeout = timeout(intervalMs: group.latencyMs)
-        let jobs = group.probes.compactMap { probe in
-            address(of: probe.target).flatMap { addr in
-                runners.first { $0.handles(probe) }.map { (probe, addr, $0) }
+        // One Round per Link, all at once; each result belongs to the Link it was sent on.
+        let rounds = await withTaskGroup(of: (Int, [(Probe, Measurements.Outcome)]).self) { all in
+            for (i, m) in links.enumerated() {
+                let jobs = group.probes.compactMap { probe in
+                    address(of: probe.target, on: m).flatMap { addr in
+                        runners.first { $0.handles(probe) }.map { (probe, addr, $0) }
+                    }
+                }
+                all.addTask {
+                    await withTaskGroup(of: (Probe, Measurements.Outcome).self,
+                                        returning: (Int, [(Probe, Measurements.Outcome)]).self) { group in
+                        for (probe, addr, runner) in jobs {
+                            group.addTask { (probe, await runner.run(probe, address: addr, interface: m.interface, timeout: timeout)) }
+                        }
+                        var out: [(Probe, Measurements.Outcome)] = []
+                        for await result in group { out.append(result) }
+                        return (i, out)
+                    }
+                }
             }
-        }
-        let outcomes = await withTaskGroup(of: (Probe, Measurements.Outcome).self) { group in
-            for (probe, addr, runner) in jobs {
-                group.addTask { (probe, await runner.run(probe, address: addr, timeout: timeout)) }
-            }
-            var out: [(Probe, Measurements.Outcome)] = []
-            for await result in group { out.append(result) }
+            var out: [Int: [(Probe, Measurements.Outcome)]] = [:]
+            for await (i, outcomes) in all { out[i] = outcomes }
             return out
         }
         // A Round the path changed under measured the switch, not the network (ADR 0013). One a
         // Pause cut records nothing: Measurements decides that from its start and end.
+        let end = Date().timeIntervalSince1970
         if !Task.isCancelled, settled {
-            measurements.commit(.init(start: start, end: Date().timeIntervalSince1970, link: link, outcomes: outcomes))
+            for (i, m) in links.enumerated() where m.isDefault || stillMeasured(m.link) {
+                measurements.commit(.init(start: start, end: end, link: m.link, outcomes: rounds[i] ?? []))
+            }
         }
         publish()
+    }
+
+    /// Whether a Link besides the default route is still there and settled.
+    private func stillMeasured(_ link: Link) -> Bool {
+        let now = Date().timeIntervalSince1970
+        return linkPaths.contains { $0.value.link == link && linkSettles[$0.key]?.ready(at: now) == true }
     }
 
     private func checkCaptivePortal() async {
@@ -292,6 +368,17 @@ final class Monitor {
         }
     }
 
+    private func apply(_ kind: LinkPath.Kind, _ l: LinkPath?) {
+        linkPaths[kind] = l
+        var settle = linkSettles[kind] ?? PathSettle(quiet: 1)
+        if let l {
+            settle.report(.init(link: l.link, up: true, ipv4: l.ipv4, ipv6: l.ipv6), at: Date().timeIntervalSince1970)
+        } else {
+            settle.reset()
+        }
+        linkSettles[kind] = settle
+    }
+
     private func apply(_ state: PathState) {
         path = state
         settle.report(.init(link: state.link, up: state.satisfied, ipv4: state.ipv4, ipv6: state.ipv6),
@@ -306,7 +393,9 @@ final class Monitor {
     }
 
     private func sweepOnce(_ target: String) async {
-        guard path.satisfied, settled, let addr = address(of: target) else { return }
+        guard path.satisfied, settled,
+              let addr = address(of: target, on: Measured(link: path.link, interface: 0, gateway: path.gateway,
+                                                          ipv4: path.ipv4, ipv6: path.ipv6, isDefault: true)) else { return }
         // spec rules/hop-trace.md: only over an IP version the path carries natively; through
         // 464XLAT the routers before the translator can't answer.
         let v6 = addr.contains(":")
