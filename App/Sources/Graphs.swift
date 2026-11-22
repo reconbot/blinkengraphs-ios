@@ -21,12 +21,15 @@ struct Series: Identifiable {
     var target: String
     var probe: Probe
     var color: Color
+    /// The legend's name: the Target, or in Compare the Target and its Link ("1.1.1.1 · Wi-Fi").
+    var label: String
+    var link: Link
     /// One per bucket with results or Paused, oldest first; a point's time is its bucket's start.
     var points: [GraphPoint]
     /// The graphs' right edge, which moves every refresh; buckets don't.
     var now: Double
     var span: Double
-    var id: String { target }
+    var id: String { label }
 
     /// A point's time against `now`: negative seconds, sliding left as time passes.
     func x(_ p: GraphPoint) -> Double { Double(p.at) - now }
@@ -44,18 +47,40 @@ struct Series: Identifiable {
         return max(86_400, d.now - oldest)
     }
 
-    static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate) -> [Series] {
+    /// One line per Target on `link` (the default-route Link when nil); with `compare`, the
+    /// first Internet Target on every measured Link instead, one color per Link (ADR 0014).
+    static func all(_ d: Dashboard, range: GraphRange, palette: Palette, aggregate: Aggregate,
+                    link: Link? = nil, compare: Bool = false) -> [Series] {
         guard let history = d.history else { return [] }
-        let span = span(d, range: range), now = Int(d.now.rounded(.down)), link = d.path.link
-        return d.layout.charted.compactMap { entry in
-            guard let probe = entry.charted else { return nil }
+        let span = span(d, range: range), now = Int(d.now.rounded(.down))
+        func line(_ probe: Probe, _ target: String, on link: Link, color: Color, label: String) -> Series? {
             let source = history.source(HistoryKey(link: link, probe: probe))
             let points = Graph.points(range, now: now, source: source, aggregate: aggregate)
             guard points.contains(where: { $0.state != .paused }) else { return nil }
             let summary = Graph.summary(range, now: now, source: source, aggregate: aggregate)
-            return Series(target: entry.target, probe: probe, color: palette.series(entry.slot), points: points,
+            return Series(target: target, probe: probe, color: color, label: label, link: link, points: points,
                           now: d.now, span: span, summary: summary.value, aggregate: aggregate, loss: summary.loss)
         }
+        if compare {
+            guard let primary = d.layout.charted.first(where: { $0.target != Probe.gateway && $0.charted != nil }),
+                  let probe = primary.charted else { return [] }
+            let links = d.links.isEmpty ? [d.path.link] : d.links.map(\.link)
+            return links.compactMap { l in
+                line(probe, primary.target, on: l, color: palette.color(l.colorToken),
+                     label: "\(TargetLayout.name(primary.target)) · \(l.kindName)")
+            }
+        }
+        let link = link ?? d.path.link
+        return d.layout.charted.compactMap { entry in
+            guard let probe = entry.charted else { return nil }
+            return line(probe, entry.target, on: link, color: palette.series(entry.slot), label: TargetLayout.name(entry.target))
+        }
+    }
+
+    /// When the default-route Link changed within the span, for markers on ranges drawn from Raw.
+    static func routeChanges(_ d: Dashboard, range: GraphRange) -> [Double] {
+        guard range.level == 0, let span = range.span, let history = d.history else { return [] }
+        return history.routes.dropFirst().map { Double($0.at) }.filter { $0 > d.now - Double(span) }
     }
 }
 
@@ -67,17 +92,29 @@ struct LatencyCard: View {
     @Binding var range: GraphRange
     /// Off while scrolling: the chart holds still under the finger.
     let animate: Bool
+    /// The Link charted when not comparing.
+    var link: Link? = nil
+    var compare: Binding<Bool>? = nil
     @State private var hidden: Set<String> = []
     @Environment(\.palette) private var palette
 
     var body: some View {
         let all = series
-        let shown = all.filter { !hidden.contains($0.target) }
+        let shown = all.filter { !hidden.contains($0.label) }
         Card(title: "Latency", accent: palette.color("color.section.latency")) {
             RangePicker(range: $range)
         } content: {
+            if let compare, dashboard.links.count > 1 {
+                Picker("Chart", selection: compare) {
+                    Text(link?.kindName ?? "This network").tag(false)
+                    Text("Compare networks").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .sensoryFeedback(.selection, trigger: compare.wrappedValue)
+            }
             LatencyChart(series: shown, now: dashboard.now, span: Series.span(dashboard, range: range),
-                         label: range.rawValue, animate: animate && dashboard.live)
+                         label: range.rawValue, animate: animate && dashboard.live,
+                         markers: Series.routeChanges(dashboard, range: range))
                 .frame(height: 190)
                 .overlay {
                     if all.isEmpty {
@@ -87,14 +124,15 @@ struct LatencyCard: View {
                 }
             VStack(spacing: 2) {
                 ForEach(all) { s in
-                    LegendRow(series: s, jitter: dashboard.stats[s.probe]?.jitterMs, hidden: hidden.contains(s.target))
+                    LegendRow(series: s, jitter: s.link == dashboard.path.link ? dashboard.stats[s.probe]?.jitterMs : nil,
+                              hidden: hidden.contains(s.label))
                         .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation(.smooth) {
-                                if hidden.remove(s.target) == nil { hidden.insert(s.target) }
+                                if hidden.remove(s.label) == nil { hidden.insert(s.label) }
                             }
                         }
-                        .sensoryFeedback(.selection, trigger: hidden.contains(s.target))
+                        .sensoryFeedback(.selection, trigger: hidden.contains(s.label))
                 }
             }
         }
@@ -113,6 +151,8 @@ private struct LatencyChart: View {
     let label: String
     /// Scroll with the clock; off while the user scrolls and for fixed demo data.
     let animate: Bool
+    /// Where the default-route Link changed (spec rules/history.md, "Graph ranges").
+    var markers: [Double] = []
     @Environment(\.palette) private var palette
 
     private let leading: CGFloat = 30, bottom: CGFloat = 18
@@ -139,6 +179,12 @@ private struct LatencyChart: View {
                 for (start, width) in paused {
                     clipped.fill(Path(CGRect(x: x(start), y: plot.minY, width: max(1, x(start + width) - x(start)), height: plot.height)),
                                  with: .color(palette.cardEdge.opacity(0.7)))
+                }
+                for t in markers {
+                    var line = Path()
+                    line.move(to: CGPoint(x: x(t), y: plot.minY))
+                    line.addLine(to: CGPoint(x: x(t), y: plot.maxY))
+                    clipped.stroke(line, with: .color(palette.textWeak), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                 }
                 // Loss along the floor, one tick per bucket at its worst Target's loss.
                 for (start, width, l) in loss {
@@ -267,7 +313,7 @@ private struct LegendRow: View {
             Circle().fill(hidden ? Color.clear : series.color)
                 .overlay(Circle().strokeBorder(series.color, lineWidth: 1.5))
                 .frame(width: 9, height: 9)
-            Text(TargetLayout.name(series.target))
+            Text(series.label)
                 .foregroundStyle(hidden ? palette.textWeak : palette.text)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 6)
@@ -496,5 +542,112 @@ struct HopTraceCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Networks
+
+/// Every Link the app can see: the one carrying your traffic first, each with its own state.
+/// Tapping one charts it; cellular while on Wi-Fi waits for the switch below (ADR 0017).
+struct NetworksCard: View {
+    let dashboard: Dashboard
+    let selected: Link
+    let compare: Bool
+    let select: (Link) -> Void
+    @AppStorage(Monitor.measureCellularKey) private var measureCellular = false
+    @State private var nudge = false
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Card(title: "Networks", accent: palette.color("color.section.network")) {
+            EmptyView()
+        } content: {
+            VStack(spacing: 0) {
+                ForEach(Array(dashboard.links.enumerated()), id: \.offset) { i, state in
+                    if i > 0 { Divider().overlay(palette.cardEdge) }
+                    row(state, isDefault: i == 0)
+                }
+                if dashboard.unmeasuredCellular {
+                    if !dashboard.links.isEmpty { Divider().overlay(palette.cardEdge) }
+                    Button { nudge.toggle() } label: {
+                        HStack(spacing: 10) {
+                            Circle().fill(palette.cardEdge).frame(width: 9, height: 9)
+                            Text("Cellular").font(.subheadline.weight(.semibold)).foregroundStyle(palette.textWeak)
+                            Spacer()
+                            Text("Not measured").font(.caption).foregroundStyle(palette.textWeak)
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Toggle(isOn: $measureCellular) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Measure cellular while on Wi-Fi").font(.subheadline)
+                    Text("Uses your data plan: an estimated 20–55 MB an hour.").font(.caption).foregroundStyle(palette.textWeak)
+                }
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 10).fill(palette.color("color.section.network").opacity(nudge ? 0.15 : 0)))
+            .animation(.smooth, value: nudge)
+            .sensoryFeedback(.selection, trigger: measureCellular)
+            .task(id: nudge) {
+                guard nudge else { return }
+                try? await Task.sleep(for: .seconds(1))
+                nudge = false
+            }
+        }
+    }
+
+    private func row(_ state: Measurements.LinkState, isDefault: Bool) -> some View {
+        let lead = state.findings.min { $0.severity < $1.severity }
+        let gateway = state.stats.first { $0.key.target == Probe.gateway }?.value
+        let primary = dashboard.layout.charted.first { $0.target != Probe.gateway }?.charted.flatMap { state.stats[$0] }
+        let loss = state.stats.values.map(\.loss).max() ?? 0
+        let chosen = !compare && state.link == selected
+        return Button { select(state.link) } label: {
+            HStack(spacing: 10) {
+                Circle().fill(state.stats.isEmpty ? palette.textWeak : palette.severity(lead?.severity ?? .ok))
+                    .frame(width: 9, height: 9)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(state.link.kindName).font(.subheadline.weight(.semibold)).foregroundStyle(palette.text)
+                        if isDefault {
+                            Text("your traffic").font(.caption2.weight(.medium)).foregroundStyle(palette.textWeak)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .overlay(Capsule().strokeBorder(palette.cardEdge))
+                        }
+                    }
+                    Text(state.stats.isEmpty ? "Measuring…" : lead?.domain == .clear ? "All clear" : lead?.headline ?? "")
+                        .font(.caption).foregroundStyle(palette.textWeak).lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                figure(gateway?.rttMs, "gateway")
+                figure(primary?.rttMs, "internet")
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(percent(loss)).foregroundStyle(loss > 0 ? palette.loss : palette.text)
+                    Text("loss").font(.caption2).foregroundStyle(palette.textWeak)
+                }
+                .font(.caption.monospacedDigit())
+                .frame(width: 40, alignment: .trailing)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 6)
+            .background(RoundedRectangle(cornerRadius: 10).fill(chosen ? palette.cardEdge.opacity(0.6) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(state.link.kindName)\(isDefault ? ", your traffic" : ""): \(lead?.headline ?? "measuring")")
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    private func figure(_ value: Double?, _ caption: String) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(ms(value)).foregroundStyle(palette.text)
+            Text(caption).font(.caption2).foregroundStyle(palette.textWeak)
+        }
+        .font(.caption.monospacedDigit())
+        .frame(width: 48, alignment: .trailing)
     }
 }

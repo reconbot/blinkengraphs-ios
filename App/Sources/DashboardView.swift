@@ -14,20 +14,35 @@ struct DashboardView: View {
     /// The screen as it was when a scroll began. Redrawing every second under a moving finger
     /// made scrolling jitter, so updates wait until the scroll ends.
     @State private var frozen: Dashboard?
+    /// The Link the chart shows; nil follows the default route.
+    @State private var chartLink: Link?
+    /// The chart shows the first Internet Target on every Link instead (ADR 0014).
+    @State private var compare = false
 
     /// `Severity` sorts most severe first.
     private var worst: Severity { dashboard.findings.map(\.severity).min() ?? .ok }
 
     var body: some View {
         let dashboard = frozen ?? self.dashboard
-        // Once per refresh, shared by the chart, its legend and the Target cards.
+        // Once per refresh. The Target cards always show the default-route Link, like the Verdict.
         let series = Series.all(dashboard, range: range, palette: palette, aggregate: aggregate)
+        let shownLink = chartLink.flatMap { l in dashboard.links.contains { $0.link == l } ? l : nil }
+        let chart = compare || shownLink != nil
+            ? Series.all(dashboard, range: range, palette: palette, aggregate: aggregate, link: shownLink, compare: compare)
+            : series
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    VerdictBanner(findings: dashboard.findings)
+                    VerdictBanner(findings: dashboard.findings, link: dashboard.path.satisfied ? dashboard.path.link.kindName : nil)
                     ConnectionChips(path: dashboard.path)
-                    LatencyCard(dashboard: dashboard, series: series, range: $range, animate: frozen == nil)
+                    NetworksCard(dashboard: dashboard, selected: shownLink ?? dashboard.path.link, compare: compare) { link in
+                        withAnimation(.smooth) {
+                            chartLink = link == dashboard.path.link ? nil : link
+                            compare = false
+                        }
+                    }
+                    LatencyCard(dashboard: dashboard, series: chart, range: $range, animate: frozen == nil,
+                                link: shownLink ?? dashboard.path.link, compare: $compare)
                     TargetGrid(dashboard: dashboard, series: series)
                     PublicAddressCard(readings: dashboard.publicAddress)
                     ForEach(dashboard.layout.traced.filter { dashboard.hops[$0.target] != nil }) { entry in
@@ -120,6 +135,8 @@ private struct Wordmark: View {
 
 private struct VerdictBanner: View {
     let findings: [Finding]
+    /// The Link the Verdict speaks for: the default route.
+    let link: String?
     @Environment(\.palette) private var palette
     @Environment(\.colorScheme) private var scheme
 
@@ -134,7 +151,8 @@ private struct VerdictBanner: View {
                     .foregroundStyle(tint)
                     .symbolEffect(.pulse, isActive: lead?.severity == .crit)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(lead.map { $0.domain == .clear ? "Verdict" : domainName($0.domain) } ?? "Verdict")
+                    Text([link, lead.map { $0.domain == .clear ? "Verdict" : domainName($0.domain) } ?? "Verdict"]
+                        .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.8)
                         .foregroundStyle(tint)
                     Text(lead?.headline ?? "Measuring…")

@@ -20,7 +20,9 @@ final class Monitor {
         Dashboard(findings: snapshot.findings, stats: snapshot.stats, denied: snapshot.denied, path: path,
                   hops: snapshot.hops, hopNames: hopNames, window: snapshot.window, now: now,
                   history: measurements.history, layout: layout, live: true, captivePortal: snapshot.captivePortal,
-                  publicAddress: snapshot.publicAddress)
+                  publicAddress: snapshot.publicAddress, links: snapshot.links,
+                  unmeasuredCellular: linkPaths[.cellular].map { $0.link.interface != path.interfaceName } == true
+                      && !UserDefaults.standard.bool(forKey: Self.measureCellularKey))
     }
 
     @ObservationIgnored private var measurements: Measurements
