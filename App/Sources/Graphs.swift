@@ -175,13 +175,21 @@ private struct LatencyChart: View {
 
     private struct Line { var color: Color; var runs: [[(t: Double, v: Double)]] }
 
-    /// Each series as runs of consecutive buckets with a value, at bucket middles.
+    /// Each series as runs of points at bucket middles. A bucket nothing was sent in is bridged:
+    /// at 1 s buckets a late round leaves one empty now and then, which broke lines into
+    /// fragments. A run breaks where everything sent was lost, or after 3 buckets and 5 s with nothing.
     private var lines: [Line] {
-        series.map { s in
+        let width = range.bucketWidth, longest = max(3 * width, 5)
+        return series.map { s in
             var runs: [[(t: Double, v: Double)]] = [], run: [(t: Double, v: Double)] = []
             for p in s.points {
-                if let v = p.value { run.append((p.start + range.bucketWidth / 2, v)) }
-                else if !run.isEmpty { runs.append(run); run = [] }
+                let t = p.start + width / 2
+                if let v = p.value {
+                    if let last = run.last, t - last.t > longest { runs.append(run); run = [] }
+                    run.append((t, v))
+                } else if p.count > 0, !run.isEmpty {
+                    runs.append(run); run = []
+                }
             }
             if !run.isEmpty { runs.append(run) }
             return Line(color: s.color, runs: runs)

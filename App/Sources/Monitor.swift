@@ -91,12 +91,17 @@ final class Monitor {
         pathWatcher = nil
     }
 
+    /// On a fixed beat: each round starts `interval` after the last one started, not after it
+    /// ended, so samples arrive evenly. A round that overruns starts the next one at once.
     private func repeating(every interval: Duration, _ work: @escaping @MainActor @Sendable (Monitor) async -> Void) {
         tasks.append(Task { [weak self] in
+            let clock = ContinuousClock()
+            var next = clock.now
             while !Task.isCancelled {
                 guard let self else { return }
                 await work(self)
-                try? await Task.sleep(for: interval)
+                next = max(next + interval, clock.now)
+                try? await Task.sleep(until: next, clock: clock)
             }
         })
     }
