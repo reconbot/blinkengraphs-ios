@@ -64,6 +64,13 @@ struct DashboardView: View {
             Button("Copy report", systemImage: "doc.on.doc") { UIPasteboard.general.string = report(redact: false) }
             Button("Copy redacted report", systemImage: "eye.slash") { UIPasteboard.general.string = report(redact: true) }
             ShareLink(item: report(redact: false)) { Label("Share report", systemImage: "square.and.arrow.up") }
+            // MetricKit hang and crash reports, for diagnosing a freeze (Diagnostics).
+            let diagnostics = Diagnostics.saved
+            if !diagnostics.isEmpty {
+                ShareLink(items: diagnostics) {
+                    Label("Share diagnostics (\(diagnostics.count))", systemImage: "stethoscope")
+                }
+            }
         } label: {
             Label("Report", systemImage: "doc.text.magnifyingglass")
         }

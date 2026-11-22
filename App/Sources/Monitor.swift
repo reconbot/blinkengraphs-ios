@@ -36,6 +36,9 @@ final class Monitor {
     @ObservationIgnored private let runners: [any ProbeRunner]
     @ObservationIgnored private var pathWatcher: PathWatcher?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
+    /// Probes wait for the path to settle after launch, a return to the app or a network change
+    /// (ADR 0013). One second is a first guess, to tune from what devices show.
+    @ObservationIgnored private var settle = PathSettle(quiet: 1)
 
     init(defaults: Defaults, group: Defaults.ProbeGroup) {
         self.defaults = defaults
@@ -58,6 +61,8 @@ final class Monitor {
                 for stored in await files.load() { history.rollups.insert(stored) }
             }
         }
+        // The path may have changed while we were away; wait for the watcher's first report.
+        settle.reset()
         let watcher = PathWatcher()
         watcher.start { [weak self] state in Task { @MainActor in self?.apply(state) } }
         pathWatcher = watcher
@@ -166,9 +171,21 @@ final class Monitor {
         }
     }
 
+    private var settled: Bool { settle.ready(at: Date().timeIntervalSince1970) }
+
+    /// Waits, up to `limit` seconds, for the path to settle.
+    private func whenSettled(limit: Double = 15) async -> Bool {
+        let end = Date().timeIntervalSince1970 + limit
+        while !settled, Date().timeIntervalSince1970 < end, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return settled
+    }
+
     private func probeOnce(at: Double) async {
         // spec rules/probe-stats.md: no network path, no Probes; the Verdict says Offline.
-        guard path.satisfied else { return publish() }
+        // A path that hasn't settled isn't measured yet (ADR 0013).
+        guard path.satisfied, settled else { return publish() }
         await refreshNames()
         // Results belong to the Link they were sent on, even if the path changes mid-flight.
         let link = path.link
@@ -186,8 +203,9 @@ final class Monitor {
                 group.addTask { (probe, await runner.run(probe, address: addr, timeout: timeout)) }
             }
             for await (probe, outcome) in group {
-                // Not measured: stopped mid-round, or suspended past the timeout (ADR 0012).
-                guard !Task.isCancelled, Date().timeIntervalSince1970 < deadline else { continue }
+                // Not measured: stopped mid-round, suspended past the timeout (ADR 0012), or the
+                // path changed under it (ADR 0013).
+                guard !Task.isCancelled, Date().timeIntervalSince1970 < deadline, settled else { continue }
                 if let result = measurements.record(probe, outcome, sentOn: link, at: at) {
                     closed += history.rollups.record(probe, result, on: link)
                 }
@@ -198,7 +216,7 @@ final class Monitor {
     }
 
     private func checkCaptivePortal() async {
-        guard path.satisfied else { return }
+        guard path.satisfied, await whenSettled() else { return }
         let link = path.link
         // No answer at all isn't a portal: keep the last known state.
         guard let portal = await CaptivePortalCheck.run(defaults.captivePortalURL) else { return }
@@ -207,7 +225,7 @@ final class Monitor {
     }
 
     private func lookUpPublicAddress() async {
-        guard path.satisfied else { return }
+        guard path.satisfied, await whenSettled() else { return }
         let link = path.link, config = defaults.publicAddress
         async let v4 = PublicAddressLookup.run(.ipv4, config)
         async let v6 = PublicAddressLookup.run(.ipv6, config)
@@ -228,6 +246,8 @@ final class Monitor {
 
     private func apply(_ state: PathState) {
         path = state
+        settle.report(.init(link: state.link, up: state.satisfied, ipv4: state.ipv4, ipv6: state.ipv6),
+                      at: Date().timeIntervalSince1970)
         if measurements.setPath(link: state.link, up: state.satisfied, viaVPN: state.vpn) {
             Task { [weak self] in
                 await self?.checkCaptivePortal()
@@ -238,7 +258,7 @@ final class Monitor {
     }
 
     private func sweepOnce(_ target: String) async {
-        guard path.satisfied, let addr = address(of: target) else { return }
+        guard path.satisfied, settled, let addr = address(of: target) else { return }
         // spec rules/hop-trace.md: only over an IP version the path carries natively; through
         // 464XLAT the routers before the translator can't answer.
         let v6 = addr.contains(":")
@@ -264,7 +284,7 @@ final class Monitor {
             for await r in group { if let r { results.append(r) } }
             return results
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, settled else { return }
         measurements.recordSweep(results, target: target, sentOn: link)
         lookUpNames(results.compactMap(\.addr))
     }
