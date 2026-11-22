@@ -1,0 +1,26 @@
+{
+  "description": "Light palette, provisional until the spec's tokens carry one (ADR 0007). Same paths as spec/tokens/blinkengraphs.tokens.json; a path missing here falls back to the dark value.",
+  "color": {
+    "loss": { "$type": "color", "$value": "#e0262d" },
+    "section": {
+      "cpu": { "$type": "color", "$value": "#0a8bc7" },
+      "disk": { "$type": "color", "$value": "#7a5bc4" },
+      "latency": { "$type": "color", "$value": "#b98a00" },
+      "memory": { "$type": "color", "$value": "#4f8a1f" },
+      "network": { "$type": "color", "$value": "#2f6fdb" },
+      "upload": { "$type": "color", "$value": "#c42f8f" }
+    },
+    "severity": {
+      "crit": { "$type": "color", "$value": "#d92d2d" },
+      "ok": { "$type": "color", "$value": "#1c9b50" },
+      "warn": { "$type": "color", "$value": "#c27400" }
+    },
+    "surface": {
+      "background": { "$type": "color", "$value": "#f2f4f8" },
+      "card": { "$type": "color", "$value": "#ffffff" },
+      "card-edge": { "$type": "color", "$value": "#dde2ea" },
+      "text": { "$type": "color", "$value": "#12151c" },
+      "text-weak": { "$type": "color", "$value": "#5d6676" }
+    }
+  }
+}

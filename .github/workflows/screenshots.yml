@@ -1,0 +1,56 @@
+name: Screenshots
+
+# Every demo scenario in light and dark, top and bottom of the screen, from the simulator.
+on:
+  pull_request:
+    paths: ["App/**", "project.yml", ".github/workflows/screenshots.yml"]
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Pick an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[]
+                      | select(.name | test("^iPhone [0-9]+ Pro$"))] | last | .udid')
+          echo "UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$udid"
+      - name: Build for the simulator
+        run: >
+          xcodebuild build -quiet
+          -project Blinkengraphs.xcodeproj -scheme Blinkengraphs
+          -destination "id=$UDID" -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO
+      - name: Capture
+        run: |
+          app=build/Build/Products/Debug-iphonesimulator/Blinkengraphs.app
+          bid=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
+            --wifiBars 3 --cellularBars 4 --dataNetwork wifi
+          xcrun simctl install "$UDID" "$app"
+          mkdir -p shots
+          for look in dark light; do
+            xcrun simctl ui "$UDID" appearance "$look"
+            for demo in isp-loss wifi cellular vpn offline; do
+              for anchor in top bottom; do
+                xcrun simctl terminate "$UDID" "$bid" 2>/dev/null || true
+                xcrun simctl launch "$UDID" "$bid" -demo "$demo" -anchor "$anchor"
+                sleep 4
+                xcrun simctl io "$UDID" screenshot "shots/$demo-$look-$anchor.png"
+              done
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots/
+          retention-days: 14

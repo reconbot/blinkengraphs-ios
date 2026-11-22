@@ -13,6 +13,13 @@ final class Monitor {
     /// Hop names by address, from reverse DNS (spec rules/hop-trace.md, "Names").
     private(set) var hopNames: [String: String] = [:]
     private var namesRequested: Set<String> = []
+    private(set) var results: [Probe: [ProbeResult]] = [:]
+    private(set) var now = Date().timeIntervalSince1970
+
+    var dashboard: Dashboard {
+        Dashboard(findings: verdict, stats: stats, denied: denied, path: path, hops: hops,
+                  hopNames: hopNames, results: results, now: now)
+    }
 
     private let defaults: Defaults
     private let runners: [any ProbeRunner]
@@ -108,6 +115,8 @@ final class Monitor {
 
     private func refreshVerdict() {
         stats = linkHistories.stats(on: path.link, windowSeconds: Double(defaults.history.recentWindowS))
+        results = linkHistories.results(on: path.link)
+        now = Date().timeIntervalSince1970
         verdict = Verdict.evaluate(VerdictInput(probes: stats.map { .init(probe: $0.key, stat: $0.value) },
                                                 pathUp: path.satisfied, viaVPN: path.vpn))
     }

@@ -6,6 +6,8 @@ enum SpecResources {
         try Defaults.decode(shared, override: data("defaults.override"))
     }
     static let tokens: Tokens = load("blinkengraphs.tokens", Tokens.decode)
+    /// This app's light palette (ADR 0007).
+    static let lightTokens: Tokens? = try? Tokens.decode(data("tokens.light"))
     /// The pinned spec's release, from release-please's manifest.
     /// Soft-fails to "unknown": Xcode may skip dot-files when copying resources.
     static let specVersion: String = Bundle.main.url(forResource: ".release-please-manifest", withExtension: "json")
