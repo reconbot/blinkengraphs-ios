@@ -53,15 +53,17 @@ private func file<T: Decodable>(_ name: String, as: T.Type) throws -> T {
     struct File: Decodable {
         var aggregate: Aggregate; var written_through: Double; var stored: [Stored]; var ram: [Ram]; var cases: [Case]
     }
-    let f = try file("buckets", as: File.self)
+    for name in ["buckets", "steady"] {
+    let f = try file(name, as: File.self)
     let stored = f.stored.map { (m: $0.m, data: Minute(n: $0.n, lost: $0.lost, max: $0.max)) }
     let ram = f.ram.map { ProbeResult(at: $0.at, rttMs: $0.v) }
     for c in f.cases {
         let points = HistoryBuckets.points(span: c.span_s, now: c.now, aggregate: f.aggregate, ram: ram,
                                            stored: stored, writtenThrough: f.written_through)
-        #expect(points.count == c.expected.count, "\(c.range) count")
+        #expect(points.count == c.expected.count, "\(name) \(c.range) count")
         for (p, e) in zip(points, c.expected) {
-            #expect(p.start == e.at && close(p.value, e.max) && abs(p.loss - e.loss) < 0.006, "\(c.range) at \(e.at)")
+            #expect(p.start == e.at && close(p.value, e.max) && abs(p.loss - e.loss) < 0.006, "\(name) \(c.range) at \(e.at)")
         }
+    }
     }
 }
