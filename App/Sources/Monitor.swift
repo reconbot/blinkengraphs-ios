@@ -1,6 +1,7 @@
 import BlinkengraphsCore
 import Foundation
 import Observation
+import UIKit
 
 /// Runs the Probe Group, the Hop Traces and the lookups while the app is open, feeding their
 /// results to `Measurements` and publishing one snapshot per refresh. Scheduling and sockets
@@ -23,6 +24,10 @@ final class Monitor {
     }
 
     @ObservationIgnored private var measurements: Measurements
+    @ObservationIgnored private let store = HistoryStore()
+    @ObservationIgnored private var loaded = false
+    /// How often History reaches disk while measuring; the spec allows at most 10 s (ADR 0016).
+    static let saveEvery: Duration = .seconds(5)
     @ObservationIgnored private var namesRequested: Set<String> = []
     @ObservationIgnored private let defaults: Defaults
     /// The user's Probe Group (Settings → Targets), else the spec's.
@@ -56,6 +61,15 @@ final class Monitor {
 
     func start() {
         guard tasks.isEmpty else { return }
+        guard loaded else {
+            tasks.append(Task { [weak self] in
+                await self?.load()
+                guard let self, !Task.isCancelled else { return }
+                self.tasks = []
+                self.start()
+            })
+            return
+        }
         // Launch, or a return from the background: the Pause ends a settle time from now.
         measurements.resume(at: Date().timeIntervalSince1970)
         // The path may have changed while we were away; wait for the watcher's first report.
@@ -66,6 +80,7 @@ final class Monitor {
 
         let group = self.group
         rounds(every: Double(group.latencyMs) / 1000)
+        repeating(every: Self.saveEvery) { await $0.save() }
         repeating(every: .seconds(60)) { await $0.checkCaptivePortal() }
         repeating(every: .seconds(defaults.publicAddress.refreshS)) { await $0.lookUpPublicAddress() }
         for target in group.targets where target.trace {
@@ -91,9 +106,49 @@ final class Monitor {
         tasks = []
         pathWatcher?.stop()
         pathWatcher = nil
-        // A Round still in flight is cut by this Pause and records nothing.
-        measurements.pause(at: Date().timeIntervalSince1970)
+        // A Round still in flight is cut by this Pause and records nothing. The Pause reaches
+        // disk now: iOS may end the suspended app without running any more of its code.
+        let now = Date().timeIntervalSince1970
+        measurements.pause(at: now)
+        measurements.mark(at: now)
+        let records = measurements.takeUnsaved()
+        let store = store
+        let task = BackgroundTask(name: "Save history")
+        Task {
+            await store.append(records, now: Int(now))
+            task.end()
+        }
         publish()
+    }
+
+    /// Restores History from disk once, at launch: a kill leaves a Pause from the newest record
+    /// to now. Steps that ended while the app was away are written, then the Archive file is
+    /// rewritten to what retention keeps.
+    private func load() async {
+        guard !loaded else { return }
+        let records = await store.load()
+        var history = History(defaults: defaults)
+        history.replay(records)
+        let now = Date().timeIntervalSince1970
+        measurements.restore(history, launch: now)
+        measurements.advance(now: now)
+        _ = measurements.takeUnsaved()
+        await store.compact(measurements.history.archiveRecords)
+        await store.prune(rawCutoff: measurements.history.rawCutoff(now: Int(now)))
+        loaded = true
+    }
+
+    /// What changed since the last save reaches disk. While nothing else happens, as when Offline,
+    /// a mark records that measuring went on.
+    private func save() async {
+        let now = Date().timeIntervalSince1970
+        var records = measurements.takeUnsaved()
+        if !records.contains(where: { if case .result = $0 { true } else { false } }) {
+            measurements.mark(at: now)
+            records += measurements.takeUnsaved()
+        }
+        await store.append(records, now: Int(now))
+        await store.prune(rawCutoff: measurements.history.rawCutoff(now: Int(now)))
     }
 
     /// Probe Rounds on the spec's fixed grid (RoundClock), each committed whole with its start.
@@ -241,7 +296,7 @@ final class Monitor {
         path = state
         settle.report(.init(link: state.link, up: state.satisfied, ipv4: state.ipv4, ipv6: state.ipv6),
                       at: Date().timeIntervalSince1970)
-        if measurements.setPath(link: state.link, up: state.satisfied, viaVPN: state.vpn) {
+        if measurements.setPath(link: state.link, up: state.satisfied, viaVPN: state.vpn, at: Date().timeIntervalSince1970) {
             Task { [weak self] in
                 await self?.checkCaptivePortal()
                 await self?.lookUpPublicAddress()
@@ -280,5 +335,24 @@ final class Monitor {
         guard !Task.isCancelled, settled else { return }
         measurements.recordSweep(results, target: target, sentOn: link)
         lookUpNames(results.compactMap(\.addr))
+    }
+}
+
+/// Keeps the app running long enough to finish a write after it leaves the foreground.
+/// https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time
+@MainActor
+private final class BackgroundTask {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }

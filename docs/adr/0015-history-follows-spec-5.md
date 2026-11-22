@@ -16,4 +16,4 @@ What it replaces:
 - **ADR 0012, backgrounding is a pause:** now the spec's Pause, with cut Rounds instead of a late-arrival deadline.
 - **ADR 0013, path settle:** the settle after a return to the app is the Pause's settle time. The quiet period after a route change stays, per decision 2 in `docs/plan-spec-5.md`.
 
-Interim: History lives in memory until Raw and Archives reach disk (`docs/plan-spec-5.md`, PR 2), so a relaunch starts empty. The settle time is 2 s, the spec vectors' value, until a device test sets it.
+History reaches disk as ADR 0016 describes. The settle time is 2 s, the spec vectors' value, until a device test sets it.
