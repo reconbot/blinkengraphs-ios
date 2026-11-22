@@ -6,6 +6,7 @@ struct DashboardView: View {
     let dashboard: Dashboard
     @Environment(\.palette) private var palette
     @State private var range: GraphRange = .fifteenMinutes
+    @State private var showingSettings = false
 
     /// `Severity` sorts most severe first.
     private var worst: Severity { dashboard.findings.map(\.severity).min() ?? .ok }
@@ -31,10 +32,14 @@ struct DashboardView: View {
             .background(palette.background.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Wordmark(severity: worst) }
-                ToolbarItem(placement: .topBarTrailing) { reportMenu }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    reportMenu
+                    Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                }
             }
             .toolbarBackground(palette.background, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showingSettings) { SettingsView() }
         }
         .tint(palette.color("color.section.network"))
         .sensoryFeedback(trigger: worst) { old, new in new < old ? .warning : nil }
@@ -50,7 +55,7 @@ struct DashboardView: View {
             Button("Copy redacted report", systemImage: "eye.slash") { UIPasteboard.general.string = report(redact: true) }
             ShareLink(item: report(redact: false)) { Label("Share report", systemImage: "square.and.arrow.up") }
         } label: {
-            Image(systemName: "doc.text.magnifyingglass")
+            Label("Report", systemImage: "doc.text.magnifyingglass")
         }
     }
 
