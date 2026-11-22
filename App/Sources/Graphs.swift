@@ -359,6 +359,9 @@ private struct TargetCard: View {
                 Text(ms(leadValue))
                     .font(.system(size: 30, weight: .semibold, design: .rounded))
                     .foregroundStyle(palette.text)
+                    // p95 readouts reach three digits; shrink rather than wrap beside the loss badge.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .contentTransition(.numericText())
                 // The readout names its aggregate unless it is the median (rules/probe-stats.md).
                 Text(aggregate == .p50 ? "ms" : "ms \(aggregate.label)").font(.caption).foregroundStyle(palette.textWeak)
