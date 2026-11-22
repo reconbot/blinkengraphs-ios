@@ -7,6 +7,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  spec-current:
+    name: Spec is the latest release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/spec-current.sh
+
   vectors-linux:
     name: Spec vectors (Linux)
     runs-on: ubuntu-latest
