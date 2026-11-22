@@ -20,7 +20,14 @@ struct VerdictView: View {
                 }
                 Section("Connection") {
                     LabeledContent("Path", value: path.satisfied ? "Up" : "Down")
-                    LabeledContent("Via", value: path.interfaces.first ?? "—")
+                    LabeledContent("Via", value: [path.interfaces.first, path.radio].compactMap { $0 }
+                        .joined(separator: " · ").nonEmpty ?? "—")
+                    LabeledContent("Supports", value: [path.ipv4 ? "IPv4" : nil, path.ipv6 ? "IPv6" : nil,
+                                                       path.dns ? "DNS" : nil].compactMap { $0 }
+                        .joined(separator: ", ").nonEmpty ?? "—")
+                    if let quality = path.linkQuality {
+                        LabeledContent("Link quality", value: quality)
+                    }
                     LabeledContent("Gateway", value: path.gateway ?? "—")
                     if path.expensive || path.constrained {
                         LabeledContent("Limits", value: [path.expensive ? "Expensive" : nil,
@@ -105,4 +112,8 @@ private struct HopRowView: View {
             HopRow(ttl: 3, addr: "1.1.1.1", sent: 10, loss: 0.2, lastMs: 14, bestMs: 11, avgMs: 13, worstMs: 20),
         ]]
     )
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
