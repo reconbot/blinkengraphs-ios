@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.0.0](https://github.com/reconbot/blinkengraphs-ios/compare/v2.0.0...v3.0.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* stored Rollups are deleted and history restarts empty.
+
+### Features
+
+* clearer Target editor (preset autocomplete, TCP toggle, DNS transport) ([#32](https://github.com/reconbot/blinkengraphs-ios/issues/32)) ([c2b6053](https://github.com/reconbot/blinkengraphs-ios/commit/c2b6053c4001846979341c10873f285669c694cc))
+* follow spec 5.2.0: History is Raw plus Archives, Pauses, stats from now ([#35](https://github.com/reconbot/blinkengraphs-ios/issues/35)) ([56f3504](https://github.com/reconbot/blinkengraphs-ios/commit/56f35046c169aeae4e6a55306c77f5d7267138e6))
+* Probes wait for the network to settle; MetricKit diagnostics ([#30](https://github.com/reconbot/blinkengraphs-ios/issues/30)) ([066eb9c](https://github.com/reconbot/blinkengraphs-ios/commit/066eb9cc23cfdbcbc8607d60e95cffc84477d628))
+
+
+### Bug Fixes
+
+* leaving the app no longer clears the graph or reports false loss ([#28](https://github.com/reconbot/blinkengraphs-ios/issues/28)) ([3bdb64d](https://github.com/reconbot/blinkengraphs-ios/commit/3bdb64d9196fc01df4777a7adb8e2e719a290836))
+
 ## [2.0.0](https://github.com/reconbot/blinkengraphs-ios/compare/v1.0.0...v2.0.0) (2026-11-22)
 
 
