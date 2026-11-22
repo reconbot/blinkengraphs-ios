@@ -56,3 +56,20 @@ import BlinkengraphsCore
     #expect(GraphBuckets.niceCeiling(140) == 150)
     #expect(GraphBuckets.niceCeiling(1300) == 1500)
 }
+
+@Test func readoutP50IsTheProbeStatsMedian() {
+    let results = [10.0, 30, 20, 40].enumerated().map { ProbeResult(at: Double($0.offset), rttMs: $0.element) }
+    let stats = ProbeHistory(results: results, ramSeconds: 900).stats(windowSeconds: 30)
+    // rtt_ms takes index ⌊n/2⌋ = 2 of [10, 20, 30, 40]; the graph rank would take index 1.
+    #expect(Readout.value(results, stats: stats, aggregate: .p50, windowSeconds: 30) == 30)
+}
+
+@Test func readoutOtherAggregatesUseOnlyTheWindowsReplies() {
+    let old = ProbeResult(at: 0, rttMs: 500)
+    let recent = (100..<110).map { ProbeResult(at: Double($0), rttMs: Double($0 - 99)) } + [ProbeResult(at: 110, rttMs: nil)]
+    let results = [old] + recent
+    let stats = ProbeHistory(results: results, ramSeconds: 900).stats(windowSeconds: 30)
+    #expect(Readout.value(results, stats: stats, aggregate: .max, windowSeconds: 30) == 10)
+    #expect(Readout.value(results, stats: stats, aggregate: .p95, windowSeconds: 30) == 9)
+    #expect(Readout.value(results, stats: stats, aggregate: .avg, windowSeconds: 30) == 5.5)
+}

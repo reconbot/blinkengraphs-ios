@@ -9,6 +9,7 @@ import BlinkengraphsCore
     #expect(d.hopTrace.reverseDns)
     #expect(d.appearance == .system)
     #expect(d.graphAggregate == .p95)
+    #expect(d.readoutAggregate == .p50)
     #expect(d.probeGroup.probes.contains(Probe(target: "1.1.1.1", protocol: "tcp:443")))
 }
 

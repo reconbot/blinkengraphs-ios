@@ -285,6 +285,7 @@ struct TargetGrid: View {
 }
 
 private struct TargetCard: View {
+    @AppStorage(Aggregate.readoutStorageKey) private var aggregate = SpecResources.defaults.readoutAggregate
     let target: String
     let probes: [Probe]
     let dashboard: Dashboard
@@ -294,14 +295,16 @@ private struct TargetCard: View {
     var body: some View {
         let sorted = probes.sorted { order($0) < order($1) }
         let lead = sorted.first.flatMap { dashboard.stats[$0] }
+        let leadValue = sorted.first.flatMap(readout)
         let accent = series?.color ?? palette.color("color.section.cpu")
         Card(title: targetName(target), accent: accent) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(ms(lead?.rttMs))
+                Text(ms(leadValue))
                     .font(.system(size: 30, weight: .semibold, design: .rounded))
                     .foregroundStyle(palette.text)
                     .contentTransition(.numericText())
-                Text("ms").font(.caption).foregroundStyle(palette.textWeak)
+                // The readout names its aggregate unless it is the median (rules/probe-stats.md).
+                Text(aggregate == .p50 ? "ms" : "ms \(aggregate.label)").font(.caption).foregroundStyle(palette.textWeak)
                 Spacer()
                 if let loss = lead?.loss, loss > 0 {
                     Text(percent(loss))
@@ -328,7 +331,7 @@ private struct TargetCard: View {
             .font(.caption)
             .monospacedDigit()
         }
-        .animation(.smooth, value: lead?.rttMs)
+        .animation(.smooth, value: leadValue)
     }
 
     @ViewBuilder private func value(_ p: Probe) -> some View {
@@ -338,9 +341,16 @@ private struct TargetCard: View {
         } else if let s = dashboard.stats[p] {
             HStack(spacing: 6) {
                 if s.loss > 0 { Text(percent(s.loss)).foregroundStyle(palette.loss) }
-                Text("\(ms(s.rttMs)) ms").foregroundStyle(palette.text)
+                Text("\(ms(readout(p))) ms").foregroundStyle(palette.text)
             }
         }
+    }
+
+    /// spec rules/probe-stats.md, "Readouts": the chosen aggregate of the Probe's window.
+    private func readout(_ p: Probe) -> Double? {
+        guard let stats = dashboard.stats[p] else { return nil }
+        return Readout.value(dashboard.results[p] ?? [], stats: stats, aggregate: aggregate,
+                             windowSeconds: Double(SpecResources.defaults.history.recentWindowS))
     }
 
     private func order(_ p: Probe) -> Int {

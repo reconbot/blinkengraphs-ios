@@ -16,6 +16,7 @@ extension Appearance {
 
 extension Aggregate {
     static let storageKey = "graphAggregate"
+    static let readoutStorageKey = "readoutAggregate"
 
     var label: String {
         switch self {
@@ -31,6 +32,7 @@ extension Aggregate {
 struct SettingsView: View {
     @AppStorage(Appearance.storageKey) private var appearance = SpecResources.defaults.appearance
     @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
+    @AppStorage(Aggregate.readoutStorageKey) private var readout = SpecResources.defaults.readoutAggregate
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
@@ -57,7 +59,18 @@ struct SettingsView: View {
                 } header: {
                     Text("Graphs show")
                 } footer: {
-                    Text("What each point of a graph shows when it covers several samples. p95 shows the slow tail a median hides; the big numbers on each card stay the median.")
+                    Text("What each point of a graph shows when it covers several samples. p95 shows the slow tail a median hides.")
+                }
+                Section {
+                    Picker("Numbers show", selection: $readout) {
+                        ForEach(Aggregate.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(palette.card)
+                } header: {
+                    Text("Numbers show")
+                } footer: {
+                    Text("The latency on each Target card, over its last 30 seconds. The Verdict always uses the median.")
                 }
                 Section("About") {
                     LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
@@ -75,5 +88,6 @@ struct SettingsView: View {
         }
         .sensoryFeedback(.selection, trigger: appearance)
         .sensoryFeedback(.selection, trigger: aggregate)
+        .sensoryFeedback(.selection, trigger: readout)
     }
 }

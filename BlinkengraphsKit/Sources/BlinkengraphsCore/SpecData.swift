@@ -59,11 +59,13 @@ public struct Defaults: Decodable, Sendable {
     public var appearance: Appearance
     /// What a history graph point shows until the user picks one in Settings (rules/graph-aggregate.md).
     public var graphAggregate: Aggregate
+    /// What a Probe's latency readout shows until the user picks one (rules/probe-stats.md, "Readouts").
+    public var readoutAggregate: Aggregate
 
     enum CodingKeys: String, CodingKey {
         case probeGroup = "probe_group", history, hopTrace = "hop_trace"
         case maxTimeoutMs = "max_timeout_ms", dnsQueryName = "dns_query_name", appearance
-        case graphAggregate = "graph_aggregate"
+        case graphAggregate = "graph_aggregate", readoutAggregate = "readout_aggregate"
     }
 
     /// The spec's shared defaults with this platform's `defaults.override.json` merged over them.
