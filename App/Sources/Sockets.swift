@@ -30,17 +30,64 @@ enum Sockets {
 
     private static let nextSequence = Mutex<UInt16>(0)
 
+    // <netinet/in.h> and <netinet6/in6.h>; written out so the build doesn't depend on Swift
+    // importing those macros.
+    private static let ipBoundIF: Int32 = 25
+    private static let ipv6BoundIF: Int32 = 125
+
+    /// Pins `fd` to one interface, so a Probe measures that Link whatever carries the default
+    /// route. No entitlement needed (docs/research/multi-link-probing.md). 0 leaves it unbound.
+    private static func bind(_ fd: Int32, v6: Bool, to interface: UInt32) -> Bool {
+        guard interface != 0 else { return true }
+        var index = Int32(bitPattern: interface)
+        let size = socklen_t(MemoryLayout<Int32>.size)
+        return (v6 ? setsockopt(fd, IPPROTO_IPV6, ipv6BoundIF, &index, size)
+                   : setsockopt(fd, IPPROTO_IP, ipBoundIF, &index, size)) == 0
+    }
+
+    /// The name of the interface the OS would send to `ip` through, unbound: which Link routes
+    /// it. Connecting a UDP socket sends nothing (decision 6 in docs/plan-spec-5.md).
+    static func routeInterface(to ip: String) -> String? {
+        guard var dst = Address(ip, port: 53) else { return nil }
+        let fd = socket(dst.v6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        guard dst.withSockaddr({ connect(fd, $0, $1) }) == 0 else { return nil }
+        var local = sockaddr_storage()
+        var len = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let got = withUnsafeMutablePointer(to: &local) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+        }
+        guard got == 0 else { return nil }
+        let source = Address.name(of: local)
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return nil }
+        defer { freeifaddrs(list) }
+        for p in Swift.sequence(first: first, next: { $0.pointee.ifa_next }) {
+            guard let sa = p.pointee.ifa_addr else { continue }
+            let family = Int32(sa.pointee.sa_family)
+            guard family == AF_INET || family == AF_INET6 else { continue }
+            var storage = sockaddr_storage()
+            withUnsafeMutableBytes(of: &storage) { dst in
+                dst.copyMemory(from: UnsafeRawBufferPointer(start: sa, count: Int(sa.pointee.sa_len)))
+            }
+            if Address.name(of: storage) == source { return String(cString: p.pointee.ifa_name) }
+        }
+        return nil
+    }
+
     private static func sequence() -> UInt16 {
         nextSequence.withLock { $0 &+= 1; return $0 }
     }
 
     /// One echo request to `ip`. With `ttl` (the hop limit on IPv6), a router on the way may answer
     /// with time exceeded.
-    static func echo(to ip: String, ttl: Int32? = nil, timeout: Duration) -> EchoOutcome {
+    static func echo(to ip: String, ttl: Int32? = nil, interface: UInt32 = 0, timeout: Duration) -> EchoOutcome {
         guard let dst = Address(ip, port: 0) else { return .sendFailed(errno: EINVAL) }
         let fd = dst.v6 ? socket(AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6) : socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)
         guard fd >= 0 else { return .sendFailed(errno: errno) }
         defer { close(fd) }
+        guard bind(fd, v6: dst.v6, to: interface) else { return .sendFailed(errno: errno) }
         if var t = ttl {
             if dst.v6 {
                 setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &t, socklen_t(MemoryLayout<Int32>.size))
@@ -73,11 +120,12 @@ enum Sockets {
     }
 
     /// One A query for `name` straight to `server`, so the OS resolver cache doesn't hide its latency.
-    static func dnsQuery(_ name: String, server: String, timeout: Duration) -> DNSOutcome {
+    static func dnsQuery(_ name: String, server: String, interface: UInt32 = 0, timeout: Duration) -> DNSOutcome {
         guard let dst = Address(server, port: 53) else { return .sendFailed(errno: EINVAL) }
         let fd = socket(dst.v6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else { return .sendFailed(errno: errno) }
         defer { close(fd) }
+        guard bind(fd, v6: dst.v6, to: interface) else { return .sendFailed(errno: errno) }
         let id = UInt16.random(in: .min ... .max)
         let start = ContinuousClock.now
         guard send(fd, DNS.query(id: id, name: name), to: dst) else { return .sendFailed(errno: errno) }
@@ -91,11 +139,12 @@ enum Sockets {
 
     /// TCP handshake time to `ip:port`: non-blocking connect, then wait for writability.
     /// An NWConnection to an IPv4 literal never became ready on IPv6-only cellular.
-    static func tcpConnect(to ip: String, port: UInt16, timeout: Duration) -> ConnectOutcome {
+    static func tcpConnect(to ip: String, port: UInt16, interface: UInt32 = 0, timeout: Duration) -> ConnectOutcome {
         guard var dst = Address(ip, port: port) else { return .failed(errno: EINVAL) }
         let fd = socket(dst.v6 ? AF_INET6 : AF_INET, SOCK_STREAM, IPPROTO_TCP)
         guard fd >= 0 else { return .failed(errno: errno) }
         defer { close(fd) }
+        guard bind(fd, v6: dst.v6, to: interface) else { return .failed(errno: errno) }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
 
         let start = ContinuousClock.now

@@ -33,6 +33,7 @@ struct SettingsView: View {
     @AppStorage(Appearance.storageKey) private var appearance = SpecResources.defaults.appearance
     @AppStorage(Aggregate.storageKey) private var aggregate = SpecResources.defaults.graphAggregate
     @AppStorage(Aggregate.readoutStorageKey) private var readout = SpecResources.defaults.readoutAggregate
+    @AppStorage(Monitor.measureCellularKey) private var measureCellular = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
@@ -71,6 +72,15 @@ struct SettingsView: View {
                     Text("Numbers show")
                 } footer: {
                     Text("The latency on each Target card, over its last \(SpecResources.defaults.history.recentWindowS) seconds. The Verdict always uses the median.")
+                }
+                Section {
+                    Toggle("Measure cellular while on Wi-Fi", isOn: $measureCellular)
+                        .listRowBackground(palette.card)
+                } header: {
+                    Text("Networks")
+                } footer: {
+                    // Estimated from packet counts (docs/research/multi-link-probing.md); a device reading replaces it.
+                    Text("Compares your carrier with your Wi-Fi. It uses your data plan: an estimated 20–55 MB an hour while the app is open.")
                 }
                 Section {
                     NavigationLink("Targets") { TargetsView() }
