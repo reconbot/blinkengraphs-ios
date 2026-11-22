@@ -5,7 +5,8 @@ import UIKit
 struct DashboardView: View {
     let dashboard: Dashboard
     @Environment(\.palette) private var palette
-    @State private var range: GraphRange = .fifteenMinutes
+    /// Remembered; also settable at launch (`-range 24h`) for screenshots.
+    @AppStorage("range") private var range: GraphRange = .fifteenMinutes
     @State private var showingSettings = false
 
     /// `Severity` sorts most severe first.
@@ -191,7 +192,7 @@ private struct ConnectionChips: View {
                 if !path.satisfied {
                     chip("No network path", "wifi.slash", tint: palette.severity(.crit))
                 } else {
-                    ForEach(path.interfaces, id: \.self) { chip(via($0), symbol($0)) }
+                    ForEach(shownInterfaces, id: \.self) { chip(via($0), symbol($0)) }
                     if path.ipv4 { chip("IPv4", "4.circle") }
                     if path.ipv6 { chip("IPv6", "6.circle") }
                     if let gw = path.gateway { chip(gw, "point.3.connected.trianglepath.dotted") }
@@ -203,6 +204,13 @@ private struct ConnectionChips: View {
             .padding(.vertical, 2)
         }
         .scrollClipDisabled()
+    }
+
+    /// One chip per kind. iOS lists every interface it could use, several cellular ones among them,
+    /// and a VPN app's tunnel even when it carries nothing; VPN shows only when traffic goes through it.
+    private var shownInterfaces: [String] {
+        var seen = Set<String>()
+        return path.interfaces.filter { ($0 != "VPN" || path.vpn) && seen.insert($0).inserted }
     }
 
     private func via(_ interface: String) -> String {

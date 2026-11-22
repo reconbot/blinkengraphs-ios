@@ -1,5 +1,6 @@
 import BlinkengraphsCore
 import SwiftUI
+import UIKit
 
 @main
 struct BlinkengraphsApp: App {
@@ -12,12 +13,26 @@ struct BlinkengraphsApp: App {
     var body: some Scene {
         WindowGroup {
             DashboardView(dashboard: demo ?? monitor.dashboard)
-                .preferredColorScheme(appearance.colorScheme)
+                .onAppear { apply(appearance) }
+                .onChange(of: appearance) { _, new in apply(new) }
         }
         // Foreground-only diagnosis: iOS suspends us in the background anyway.
         .onChange(of: phase) { _, phase in
             guard demo == nil else { return }
             if phase == .active { monitor.start() } else { monitor.stop() }
+        }
+    }
+
+    /// Set on the window, not with `preferredColorScheme`: that one didn't reach an open sheet,
+    /// and setting it back to nil doesn't return to following the system.
+    private func apply(_ appearance: Appearance) {
+        let style: UIUserInterfaceStyle = switch appearance {
+        case .system: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.windows.forEach { $0.overrideUserInterfaceStyle = style }
         }
     }
 }

@@ -18,8 +18,13 @@ final class Monitor {
 
     var dashboard: Dashboard {
         Dashboard(findings: verdict, stats: stats, denied: denied, path: path, hops: hops,
-                  hopNames: hopNames, results: results, now: now)
+                  hopNames: hopNames, results: results, now: now, history: history)
     }
+
+    /// Minutes older than the RAM History, for the 1h, 24h and 7d graphs.
+    let history: RollupHistory
+    private let files: RollupFiles
+    private var loaded = false
 
     private let defaults: Defaults
     private let runners: [any ProbeRunner]
@@ -32,11 +37,19 @@ final class Monitor {
     init(defaults: Defaults) {
         self.defaults = defaults
         linkHistories = LinkHistories(ramSeconds: Double(defaults.history.ramMinutes * 60))
+        history = RollupHistory(keepDays: defaults.history.rollupDays)
+        files = RollupFiles(keepDays: defaults.history.rollupDays)
         runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName)]
     }
 
     func start() {
         guard tasks.isEmpty else { return }
+        if !loaded {
+            loaded = true
+            Task { [files, history] in
+                for stored in await files.load() { history.rollups.insert(stored) }
+            }
+        }
         let watcher = PathWatcher()
         watcher.start { [weak self] state in Task { @MainActor in self?.apply(state) } }
         pathWatcher = watcher
@@ -147,7 +160,10 @@ final class Monitor {
             return
         }
         if link == path.link { denied.remove(probe) }
-        linkHistories.record(probe, ProbeResult(at: at, rttMs: rtt), on: link)
+        let result = ProbeResult(at: at, rttMs: rtt)
+        linkHistories.record(probe, result, on: link)
+        let closed = history.rollups.record(probe, result, on: link)
+        if !closed.isEmpty { Task { [files] in await files.append(closed) } }
     }
 
     private func sweepOnce(_ target: String) async {
