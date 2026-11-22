@@ -199,7 +199,7 @@ private struct LatencyChart: View {
             for p in s.points {
                 let x = s.x(p)
                 if let v = p.value {
-                    lines.append(Plot(key: "\(s.target)#\(segment)", start: p.start, x: x, y: min(v, yMax),
+                    lines.append(Plot(start: p.start, key: "\(s.target)#\(segment)", x: x, y: min(v, yMax),
                                       color: s.color, loss: p.loss))
                 } else {
                     segment += 1
@@ -208,7 +208,7 @@ private struct LatencyChart: View {
             }
         }
         let dots = worstLoss.map { start, loss in
-            Plot(key: "loss", start: start, x: start + width / 2 - now, y: 0, color: palette.loss, loss: loss)
+            Plot(start: start, key: "loss", x: start + width / 2 - now, y: 0, color: palette.loss, loss: loss)
         }
         return (lines, dots)
     }
