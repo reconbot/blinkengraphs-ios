@@ -120,6 +120,12 @@ private struct TargetEditor: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                    ForEach(TargetLayout.presets(completing: row.target), id: \.self) { preset in
+                        Button { row.target = preset } label: {
+                            LabeledContent(TargetLayout.name(preset), value: preset)
+                        }
+                        .foregroundStyle(palette.text)
+                    }
                 } header: { Text("Target") } footer: {
                     if !row.target.isEmpty && !Defaults.Target.isValid(row.target) {
                         Text("Not an address or a host name.").foregroundStyle(palette.severity(.crit))
