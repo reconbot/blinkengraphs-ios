@@ -176,6 +176,7 @@ private struct VerdictBanner: View {
         case .vpn: "VPN"
         case .captivePortal: "Captive portal"
         case .clear: "All clear"
+        case .paused: "Paused"
         }
     }
 }
