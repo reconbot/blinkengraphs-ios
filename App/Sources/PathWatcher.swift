@@ -1,3 +1,4 @@
+import BlinkengraphsCore
 import CoreTelephony
 import Foundation
 import Network
@@ -6,6 +7,8 @@ import Network
 struct PathState: Equatable, Sendable {
     var satisfied = false
     var interfaces: [String] = []
+    /// BSD name of the preferred interface (en0, pdp_ip0); with the Gateway it names the Link.
+    var interfaceName: String?
     /// The Gateway's IPv4 address, when the path has one.
     var gateway: String?
     var expensive = false
@@ -20,6 +23,8 @@ struct PathState: Equatable, Sendable {
 
     init() {}
 
+    var link: Link { Link(interface: interfaceName ?? "none", gateway: gateway) }
+
     init(_ path: NWPath) {
         satisfied = path.status == .satisfied
         interfaces = path.availableInterfaces.map { i in
@@ -31,9 +36,11 @@ struct PathState: Equatable, Sendable {
             default: i.name
             }
         }
+        interfaceName = path.availableInterfaces.first?.name
         gateway = path.gateways.lazy.compactMap { endpoint -> String? in
             guard case .hostPort(.ipv4(let a), _) = endpoint else { return nil }
-            return a.rawValue.map(String.init).joined(separator: ".")
+            let ip = a.rawValue.map(String.init).joined(separator: ".")
+            return Gateway.isRouter(ip) ? ip : nil
         }.first
         expensive = path.isExpensive
         constrained = path.isConstrained

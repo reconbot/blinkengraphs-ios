@@ -13,7 +13,7 @@ Changes that touch more than one repo follow the spec's `docs/sync.md`: bump the
 
 A rule this app needs but the spec lacks is a spec PR first. The Windows reference implementation (reconbot/blinkengraphs-win) regenerates the vectors.
 
-iOS Local Network Privacy can block Gateway Probes: report them as `denied`, never as loss.
+iOS Local Network Privacy gates TCP and UDP to the LAN, not ICMP (`docs/research/local-network-privacy.md`). A Probe it blocks is `denied`, never loss.
 
 Project memory lives in the repo: decisions `docs/adr/`, research `docs/research/`. Record learnings there.
 
