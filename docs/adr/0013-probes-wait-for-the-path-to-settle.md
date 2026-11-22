@@ -1,6 +1,6 @@
 # 13. Probes wait for the path to settle
 
-**Status:** accepted
+**Status:** accepted; amended by ADR 0015: a return to the app is a Pause with its own settle time, and this quiet period applies to route changes only
 
 The first results after a network change measured the switch, not the network. A device going from Wi-Fi to cellular showed early spikes and losses, and after a return to the app the first rounds ran on the path from before the pause, filed under the wrong Link.
 

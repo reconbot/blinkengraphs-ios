@@ -9,12 +9,12 @@ struct Dashboard: Sendable {
     var path = PathState()
     var hops: [String: [HopRow]] = [:]
     var hopNames: [String: String] = [:]
-    /// Each Probe's RAM History on the current Link, for the graphs.
-    var results: [Probe: [ProbeResult]] = [:]
+    /// Each Probe's results in its stats window, for the readouts.
+    var window: [Probe: [ProbeResult]] = [:]
     /// The graphs' right edge, in the results' clock (seconds since 1970).
     var now: Double = Date().timeIntervalSince1970
-    /// Rollups for the longer graphs; nil before any exist.
-    var history: RollupHistory?
+    /// Raw, Archives and Pauses, for the graphs.
+    var history: History?
     /// The Probe Group as shown: names, order, charted Probes, colour slots.
     var layout = TargetLayout(SpecResources.defaults.probeGroup)
     /// Measured now, stamped with the clock; demo data is fixed and doesn't scroll.

@@ -1,6 +1,6 @@
 # 5. Probe History is kept per Link
 
-**Status:** accepted, ahead of the spec
+**Status:** superseded by ADR 0015
 
 `rules/probe-stats.md` keeps one History per Probe. On a phone that hops between Wi-Fi and cellular, that carries one link's loss onto the next: device testing showed "gateway losing 11%" on Wi-Fi, made up of pings sent to the cellular translator before the switch.
 

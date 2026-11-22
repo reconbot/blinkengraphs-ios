@@ -1,6 +1,6 @@
 # 7. Rollups on disk as one JSON Lines file per day
 
-**Status:** accepted
+**Status:** superseded by ADR 0015
 
 The 1h, 24h and 7d graphs read Rollups: one `Minute` (spec `rules/graph-aggregate.md`, "Per-minute storage") per Probe per Link per minute, kept `rollup_days`. `RollupFiles` stores them in Application Support as `rollups/<days since 1970>.jsonl`, one `StoredMinute` per line, with the sketch in the spec's byte encoding, base64.
 

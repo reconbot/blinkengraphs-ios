@@ -17,16 +17,12 @@ final class Monitor {
 
     var dashboard: Dashboard {
         Dashboard(findings: snapshot.findings, stats: snapshot.stats, denied: snapshot.denied, path: path,
-                  hops: snapshot.hops, hopNames: hopNames, results: snapshot.results, now: now,
-                  history: history, layout: layout, live: true, captivePortal: snapshot.captivePortal,
+                  hops: snapshot.hops, hopNames: hopNames, window: snapshot.window, now: now,
+                  history: measurements.history, layout: layout, live: true, captivePortal: snapshot.captivePortal,
                   publicAddress: snapshot.publicAddress)
     }
 
-    /// Minutes written to storage; the graphs read them up to the handover to RAM.
-    @ObservationIgnored let history: RollupHistory
     @ObservationIgnored private var measurements: Measurements
-    @ObservationIgnored private let files: RollupFiles
-    @ObservationIgnored private var loaded = false
     @ObservationIgnored private var namesRequested: Set<String> = []
     @ObservationIgnored private let defaults: Defaults
     /// The user's Probe Group (Settings → Targets), else the spec's.
@@ -36,31 +32,32 @@ final class Monitor {
     @ObservationIgnored private let runners: [any ProbeRunner]
     @ObservationIgnored private var pathWatcher: PathWatcher?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
-    /// Probes wait for the path to settle after launch, a return to the app or a network change
-    /// (ADR 0013). One second is a first guess, to tune from what devices show.
+    /// Probes wait for the path to settle after a network change (ADR 0013). One second is a
+    /// first guess, to tune from what devices show.
     @ObservationIgnored private var settle = PathSettle(quiet: 1)
+    /// After the app returns, the Pause lasts this much longer: Probes sent before the network
+    /// is usable again aren't counted (spec rules/history.md, "Pauses"). The spec vectors' 2 s,
+    /// until a device test sets it (docs/plan-spec-5.md, "Device tests").
+    static let resumeSettle = 2.0
 
     init(defaults: Defaults, group: Defaults.ProbeGroup) {
         self.defaults = defaults
         self.group = group
         layout = TargetLayout(group)
-        measurements = Measurements(defaults: defaults)
+        measurements = Measurements(defaults: defaults, settle: Self.resumeSettle)
         measurements.setProbeGroup(group)
-        snapshot = measurements.snapshot()
-        history = RollupHistory(keepDays: defaults.history.rollupDays, maxTimeoutMs: defaults.maxTimeoutMs)
-        files = RollupFiles(keepDays: defaults.history.rollupDays)
+        snapshot = measurements.snapshot(now: Date().timeIntervalSince1970)
+        // Spec 5 replaced Rollups; the owner chose to drop them, not convert them (ADR 0015).
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.removeItem(at: support.appendingPathComponent("rollups", isDirectory: true))
         runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName),
                    SystemDNSProbeRunner(domain: defaults.dnsQueryName)]
     }
 
     func start() {
         guard tasks.isEmpty else { return }
-        if !loaded {
-            loaded = true
-            Task { [files, history] in
-                for stored in await files.load() { history.rollups.insert(stored) }
-            }
-        }
+        // Launch, or a return from the background: the Pause ends a settle time from now.
+        measurements.resume(at: Date().timeIntervalSince1970)
         // The path may have changed while we were away; wait for the watcher's first report.
         settle.reset()
         let watcher = PathWatcher()
@@ -94,19 +91,18 @@ final class Monitor {
         tasks = []
         pathWatcher?.stop()
         pathWatcher = nil
-        // Backgrounding isn't shutting down (ADR 0012): write the minutes that have ended and keep
-        // the open one pending, so a quick return doesn't split it.
-        let rest = history.rollups.flushEnded(at: Date().timeIntervalSince1970)
-        if !rest.isEmpty { Task { [files] in await files.append(rest) } }
+        // A Round still in flight is cut by this Pause and records nothing.
+        measurements.pause(at: Date().timeIntervalSince1970)
+        publish()
     }
 
-    /// Probe rounds on the spec's fixed grid (RoundClock), each result stamped with its round's `at`.
+    /// Probe Rounds on the spec's fixed grid (RoundClock), each committed whole with its start.
     private func rounds(every interval: Double) {
         tasks.append(Task { [weak self] in
             var clock = RoundClock(start: Date().timeIntervalSince1970, interval: interval)
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.probeOnce(at: clock.at)
+                await self.probeOnce(start: clock.start)
                 clock.finished(at: Date().timeIntervalSince1970)
                 let wait = clock.start - Date().timeIntervalSince1970
                 if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
@@ -130,8 +126,9 @@ final class Monitor {
     }
 
     private func publish() {
-        snapshot = measurements.snapshot()
         now = Date().timeIntervalSince1970
+        measurements.advance(now: now)
+        snapshot = measurements.snapshot(now: now)
     }
 
     private func timeout(intervalMs: Int) -> Duration {
@@ -182,7 +179,7 @@ final class Monitor {
         return settled
     }
 
-    private func probeOnce(at: Double) async {
+    private func probeOnce(start: Double) async {
         // spec rules/probe-stats.md: no network path, no Probes; the Verdict says Offline.
         // A path that hasn't settled isn't measured yet (ADR 0013).
         guard path.satisfied, settled else { return publish() }
@@ -195,23 +192,19 @@ final class Monitor {
                 runners.first { $0.handles(probe) }.map { (probe, addr, $0) }
             }
         }
-        // Any answer later than this waited out a suspension, not the network.
-        let deadline = Date().timeIntervalSince1970 + timeout.milliseconds / 1000 + history.rollups.graceSeconds
-        var closed: [StoredMinute] = []
-        await withTaskGroup(of: (Probe, Measurements.Outcome).self) { group in
+        let outcomes = await withTaskGroup(of: (Probe, Measurements.Outcome).self) { group in
             for (probe, addr, runner) in jobs {
                 group.addTask { (probe, await runner.run(probe, address: addr, timeout: timeout)) }
             }
-            for await (probe, outcome) in group {
-                // Not measured: stopped mid-round, suspended past the timeout (ADR 0012), or the
-                // path changed under it (ADR 0013).
-                guard !Task.isCancelled, Date().timeIntervalSince1970 < deadline, settled else { continue }
-                if let result = measurements.record(probe, outcome, sentOn: link, at: at) {
-                    closed += history.rollups.record(probe, result, on: link)
-                }
-            }
+            var out: [(Probe, Measurements.Outcome)] = []
+            for await result in group { out.append(result) }
+            return out
         }
-        if !closed.isEmpty { Task { [files] in await files.append(closed) } }
+        // A Round the path changed under measured the switch, not the network (ADR 0013). One a
+        // Pause cut records nothing: Measurements decides that from its start and end.
+        if !Task.isCancelled, settled {
+            measurements.commit(.init(start: start, end: Date().timeIntervalSince1970, link: link, outcomes: outcomes))
+        }
         publish()
     }
 

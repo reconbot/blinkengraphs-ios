@@ -1,6 +1,6 @@
 # 12. Backgrounding pauses measuring; it is not shutting down
 
-**Status:** accepted
+**Status:** superseded by ADR 0015
 
 Measuring stops when the scene goes to `.background` and resumes at `.active` (ADR 0004). `.inactive` (a screenshot, Control Center, a notification) keeps measuring.
 

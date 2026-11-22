@@ -30,31 +30,40 @@ enum Demo: String, CaseIterable {
     func dashboard(defaults: Defaults = SpecResources.defaults, now: Double = 1_800_000_000) -> Dashboard {
         var rng = SplitMix64(seed: UInt64(rawValue.hashValueStable))
         var d = Dashboard(path: path, now: now)
-        let ram = Double(defaults.history.ramMinutes * 60)
+        // Raw for the range shown; the screenshot of 1h needs an hour, the others 15 minutes.
+        let rawSpan = Self.launchRange == .oneHour ? 3600.0 : 900
+        let start = now - rawSpan
         let end = self == .offline ? now - 95 : now
         // The same Measurements the app runs, fed generated results, so a screenshot shows what the
         // rules would really show.
-        var m = Measurements(defaults: defaults)
         let link = d.path.link
+        // A week of A1 Rows before Raw begins takes a while in a Debug build: only for a range that shows them.
+        let seeded = (Self.launchRange?.span ?? .max) > Int(rawSpan)
+            ? archives(defaults: defaults, start: start, link: link, rng: &rng) : nil
+        var m = Measurements(defaults: defaults, settle: 0, history: seeded)
         m.setPath(link: link, up: true, viaVPN: d.path.vpn)
-        for probe in defaults.probeGroup.probes {
-            guard let shape = shape(probe) else { continue }
-            var t = now - ram + 1
-            while t <= end {
+        m.resume(at: start)
+        var t = start + 0.2
+        while t <= end {
+            let outcomes: [(Probe, Measurements.Outcome)] = defaults.probeGroup.probes.compactMap { probe in
+                guard let shape = shape(probe) else { return nil }
                 let spike = shape.spikeEvery > 0 && Int(t) % shape.spikeEvery < 20
                 // Only the ISP scenario loses Probes in its spikes; elsewhere a spike is latency alone.
                 let lost = rng.unit() < shape.loss + (spike && self == .ispLoss ? 0.25 : 0)
                 let rtt = shape.base + abs(rng.normal()) * shape.jitter + (spike ? shape.base * 0.8 : 0)
-                _ = m.record(probe, lost ? .lost : .reply(ms: rtt), sentOn: link, at: t)
-                t += 1
+                return (probe, lost ? .lost : .reply(ms: rtt))
             }
+            m.commit(.init(start: t, end: t + 0.3, link: link, outcomes: outcomes))
+            t += 1
         }
         m.setCaptivePortal(self == .captive, checkedOn: link)
         m.setPath(link: link, up: d.path.satisfied, viaVPN: d.path.vpn)
-        let snapshot = m.snapshot()
+        m.advance(now: now)
+        let snapshot = m.snapshot(now: now)
         d.findings = snapshot.findings
         d.stats = snapshot.stats
-        d.results = snapshot.results
+        d.window = snapshot.window
+        d.history = m.history
         d.captivePortal = snapshot.captivePortal
         // Documentation addresses (RFC 5737, RFC 3849), never a real one.
         d.publicAddress = switch self {
@@ -67,37 +76,35 @@ enum Demo: String, CaseIterable {
                   .ipv6: PublicAddressReading(state: .agree, address: "2001:db8:1:4000::1", asn: "64500")]
         }
         if self != .offline && self != .captive { (d.hops, d.hopNames) = hops }
-        // A week of Rollups takes a while to make in a Debug build: only for a range that shows them.
-        if (Self.launchRange?.fixedSeconds ?? .infinity) > ram {
-            d.history = rollups(defaults: defaults, now: now, link: d.path.link, rng: &rng)
-        }
         return d
     }
 
-    /// A week of minutes before the RAM History begins, so storage hands over to RAM there: the
-    /// phone was in use by day and the app closed overnight, so nights are gaps. In the ISP
+    /// Eight days of A1 Rows before Raw begins, from which the app's own writer builds A2 and A3.
+    /// The phone was in use by day and the app closed overnight, so nights are Pauses. In the ISP
     /// scenario the trouble starts two hours ago.
-    @MainActor
-    private func rollups(defaults: Defaults, now: Double, link: Link, rng: inout SplitMix64) -> RollupHistory {
-        let history = RollupHistory(keepDays: defaults.history.rollupDays, maxTimeoutMs: defaults.maxTimeoutMs)
-        let nowMinute = Int(now / 60)
-        let ramStartMinute = Int((now - Double(defaults.history.ramMinutes * 60) + 1) / 60)
-        let first = nowMinute - defaults.history.rollupDays * 24 * 60 + 1
+    private func archives(defaults: Defaults, start: Double, link: Link, rng: inout SplitMix64) -> History {
+        var h = History(defaults: defaults)
+        let step = 300, last = Int(start) / step * step - step, first = last - 8 * 86_400
         for probe in defaults.probeGroup.probes {
-            for minute in first..<ramStartMinute {
-                let hour = (minute / 60) % 24
-                if (1...6).contains(hour) && nowMinute - minute > 120 { continue }
-                let troubled = self == .ispLoss && nowMinute - minute <= 120
+            for m in stride(from: first, through: last, by: step) {
+                let hour = (m / 3600) % 24
+                if (1...6).contains(hour) && last - m > 7200 { continue }
+                let troubled = self == .ispLoss && last - m <= 7200
                 guard let shape = (troubled || self != .ispLoss ? self : .wifi).shape(probe) else { continue }
-                var m = Minute()
-                for _ in 0..<4 {
+                var row = Row()
+                for _ in 0..<20 {
                     let lost = rng.unit() < shape.loss
-                    m.record(lost ? nil : shape.base + abs(rng.normal()) * shape.jitter * 0.6)
+                    row.record(lost ? nil : (shape.base + abs(rng.normal()) * shape.jitter * 0.6).rounded())
                 }
-                history.rollups.insert(StoredMinute(link: link, probe: probe, minute: minute, data: m))
+                h.insert(row, key: HistoryKey(link: link, probe: probe), level: 0, m: m)
             }
         }
-        return history
+        // The same nights the Rows skip: 01:00–07:00, ending where the last two hours begin.
+        for day in stride(from: first / 86_400 * 86_400, through: last, by: 86_400) {
+            let end = min(day + 7 * 3600, last - 7200)
+            if end > day + 3600 { h.add(Pause(begin: Double(day + 3600), end: Double(end))) }
+        }
+        return h
     }
 
     fileprivate struct Shape { var base: Double; var jitter: Double; var loss: Double; var spikeEvery = 0 }
