@@ -155,76 +155,26 @@ private struct LatencyChart: View {
     var markers: [Double] = []
     @Environment(\.palette) private var palette
 
-    private let leading: CGFloat = 30, bottom: CGFloat = 18
-
     var body: some View {
-        let yMax = yMax, lines = lines, loss = worstLoss, paused = paused
-        // About a pixel of movement per frame: 30 fps for 1m, rarely for 7d.
-        TimelineView(.animation(minimumInterval: max(1.0 / 30, span / 600), paused: !animate)) { context in
+        let frame = ChartFrame(lines: lines, paused: paused, loss: worstLoss, markers: markers, yMax: yMax, span: span,
+                               firstAt: series.compactMap { $0.points.first?.at }.min().map(Double.init),
+                               grid: palette.cardEdge, weak: palette.textWeak, lossColor: palette.loss)
+        let now = now, animate = animate
+        // About a pixel of movement per frame: 30 fps for 1m, rarely for 7d. SwiftUI may run this
+        // TimelineView and its Canvas on its async-render thread rather than the main actor, so
+        // both closures are @Sendable and read only `frame`; main-actor closures trap there.
+        TimelineView(.animation(minimumInterval: max(1.0 / 30, span / 600), paused: !animate)) { @Sendable context in
             // Live data is stamped with the clock, so it never runs ahead of the edge.
             let edge = animate ? max(context.date.timeIntervalSince1970, now) : now
-            Canvas { ctx, size in
-                let plot = CGRect(x: leading, y: 4, width: max(1, size.width - leading), height: max(1, size.height - bottom - 4))
-                drawGrid(&ctx, plot, yMax: yMax)
-                var clipped = ctx
-                clipped.clip(to: Path(plot))
-                let x = { (t: Double) in plot.maxX - CGFloat((edge - t) / span) * plot.width }
-                let y = { (v: Double) in plot.maxY - CGFloat(min(v, yMax) / yMax) * plot.height }
-                // Before the first point there is no data (rules/history.md, "Drawing").
-                if let first = series.compactMap({ $0.points.first?.at }).min(), Double(first) > edge - span {
-                    clipped.fill(Path(CGRect(x: plot.minX, y: plot.minY, width: x(Double(first)) - plot.minX, height: plot.height)),
-                                 with: .color(palette.cardEdge.opacity(0.35)))
-                }
-                // Paused: not measuring, never loss. A Pause is machine-wide, so every line shares it.
-                for (start, width) in paused {
-                    clipped.fill(Path(CGRect(x: x(start), y: plot.minY, width: max(1, x(start + width) - x(start)), height: plot.height)),
-                                 with: .color(palette.cardEdge.opacity(0.7)))
-                }
-                for t in markers {
-                    var line = Path()
-                    line.move(to: CGPoint(x: x(t), y: plot.minY))
-                    line.addLine(to: CGPoint(x: x(t), y: plot.maxY))
-                    clipped.stroke(line, with: .color(palette.textWeak), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                }
-                // Loss along the floor, one tick per bucket at its worst Target's loss.
-                for (start, width, l) in loss {
-                    let r = CGRect(x: x(start), y: plot.maxY - plot.height * 0.06,
-                                   width: max(1, x(start + width) - x(start)), height: plot.height * 0.06)
-                    clipped.fill(Path(r), with: .color(palette.loss.opacity(0.25 + 0.75 * min(1, l * 2.5))))
-                }
-                for line in lines {
-                    // The provisional edge can still change: drawn hollow.
-                    if let p = line.provisional {
-                        let c = CGPoint(x: x(p.t), y: y(p.v))
-                        clipped.stroke(Path(ellipseIn: CGRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5)),
-                                       with: .color(line.color), lineWidth: 1.5)
-                    }
-                    for run in line.runs {
-                        if run.count == 1, let p = run.first {
-                            let c = CGPoint(x: x(p.t), y: y(p.v))
-                            clipped.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(line.color))
-                            continue
-                        }
-                        var path = Path()
-                        for (i, p) in run.enumerated() {
-                            let pt = CGPoint(x: x(p.t), y: y(p.v))
-                            if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
-                        }
-                        clipped.stroke(path, with: .color(line.color),
-                                       style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    }
-                }
-            }
+            Canvas { @Sendable ctx, size in frame.draw(&ctx, size: size, edge: edge) }
         }
         .accessibilityElement()
         .accessibilityLabel("Latency over \(label == "All" ? "all history" : "the last \(label)")")
     }
 
-    private struct Line { var color: Color; var runs: [[(t: Double, v: Double)]]; var provisional: (t: Double, v: Double)? }
-
     /// Each series as runs of closed points at bucket starts (rules/history.md, "Drawing"). A run
     /// breaks at a bucket with no point, a Paused one, and one whose results were all lost.
-    private var lines: [Line] {
+    private var lines: [ChartLine] {
         series.map { s in
             var runs: [[(t: Double, v: Double)]] = [], run: [(t: Double, v: Double)] = []
             var provisional: (t: Double, v: Double)?
@@ -236,7 +186,7 @@ private struct LatencyChart: View {
                 if p.provisional { provisional = (Double(p.at), v) } else { run.append((Double(p.at), v)) }
             }
             if !run.isEmpty { runs.append(run) }
-            return Line(color: s.color, runs: runs, provisional: provisional)
+            return ChartLine(color: s.color, runs: runs, provisional: provisional)
         }
     }
 
@@ -263,17 +213,96 @@ private struct LatencyChart: View {
         let p98 = values[Int(Double(values.count - 1) * 0.98)]
         return GraphScale.niceCeiling(max(10, p98 * 1.15))
     }
+}
+
+/// One Target's line, as LatencyChart draws it.
+private struct ChartLine: Sendable {
+    var color: Color
+    var runs: [[(t: Double, v: Double)]]
+    var provisional: (t: Double, v: Double)?
+}
+
+/// Everything LatencyChart draws, computed on the main actor, so drawing needs nothing else and
+/// can run on whichever thread SwiftUI renders the Canvas.
+private struct ChartFrame: Sendable {
+    var lines: [ChartLine]
+    var paused: [(start: Double, width: Double)]
+    var loss: [(start: Double, width: Double, loss: Double)]
+    /// Where the default-route Link changed (spec rules/history.md, "Graph ranges").
+    var markers: [Double]
+    var yMax: Double
+    var span: Double
+    /// The first point; before it there is no data (rules/history.md, "Drawing").
+    var firstAt: Double?
+    var grid: Color
+    var weak: Color
+    var lossColor: Color
+
+    static let leading: CGFloat = 30, bottom: CGFloat = 18
+
+    func draw(_ ctx: inout GraphicsContext, size: CGSize, edge: Double) {
+        let plot = CGRect(x: Self.leading, y: 4, width: max(1, size.width - Self.leading), height: max(1, size.height - Self.bottom - 4))
+        drawGrid(&ctx, plot, yMax: yMax)
+        var clipped = ctx
+        clipped.clip(to: Path(plot))
+        let x = { (t: Double) in plot.maxX - CGFloat((edge - t) / span) * plot.width }
+        let y = { (v: Double) in plot.maxY - CGFloat(min(v, yMax) / yMax) * plot.height }
+        // Before the first point there is no data (rules/history.md, "Drawing").
+        if let first = firstAt, first > edge - span {
+            clipped.fill(Path(CGRect(x: plot.minX, y: plot.minY, width: x(first) - plot.minX, height: plot.height)),
+                         with: .color(grid.opacity(0.35)))
+        }
+        // Paused: not measuring, never loss. A Pause is machine-wide, so every line shares it.
+        for (start, width) in paused {
+            clipped.fill(Path(CGRect(x: x(start), y: plot.minY, width: max(1, x(start + width) - x(start)), height: plot.height)),
+                         with: .color(grid.opacity(0.7)))
+        }
+        for t in markers {
+            var line = Path()
+            line.move(to: CGPoint(x: x(t), y: plot.minY))
+            line.addLine(to: CGPoint(x: x(t), y: plot.maxY))
+            clipped.stroke(line, with: .color(weak), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+        }
+        // Loss along the floor, one tick per bucket at its worst Target's loss.
+        for (start, width, l) in loss {
+            let r = CGRect(x: x(start), y: plot.maxY - plot.height * 0.06,
+                           width: max(1, x(start + width) - x(start)), height: plot.height * 0.06)
+            clipped.fill(Path(r), with: .color(lossColor.opacity(0.25 + 0.75 * min(1, l * 2.5))))
+        }
+        for line in lines {
+            // The provisional edge can still change: drawn hollow.
+            if let p = line.provisional {
+                let c = CGPoint(x: x(p.t), y: y(p.v))
+                clipped.stroke(Path(ellipseIn: CGRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5)),
+                               with: .color(line.color), lineWidth: 1.5)
+            }
+            for run in line.runs {
+                if run.count == 1, let p = run.first {
+                    let c = CGPoint(x: x(p.t), y: y(p.v))
+                    clipped.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(line.color))
+                    continue
+                }
+                var path = Path()
+                for (i, p) in run.enumerated() {
+                    let pt = CGPoint(x: x(p.t), y: y(p.v))
+                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                }
+                clipped.stroke(path, with: .color(line.color),
+                               style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
 
     /// Fixed gridlines: ages are measured back from the edge, so they hold still as data scrolls.
     private func drawGrid(_ ctx: inout GraphicsContext, _ plot: CGRect, yMax: Double) {
-        let grid = GraphicsContext.Shading.color(palette.cardEdge)
+        let shading = GraphicsContext.Shading.color(grid)
         let step = GraphScale.niceCeiling(yMax / 4)
         var v = 0.0
         while v <= yMax + 0.001 {
             let y = plot.maxY - CGFloat(v / yMax) * plot.height
             ctx.stroke(Path { $0.move(to: CGPoint(x: plot.minX, y: y)); $0.addLine(to: CGPoint(x: plot.maxX, y: y)) },
-                       with: grid, lineWidth: 0.5)
-            ctx.draw(Text("\(Int(v))").font(.caption2).foregroundStyle(palette.textWeak),
+                       with: shading, lineWidth: 0.5)
+            ctx.draw(Text("\(Int(v))").font(.caption2).foregroundStyle(weak),
                      at: CGPoint(x: plot.minX - 4, y: y), anchor: .trailing)
             v += step
         }
@@ -282,8 +311,8 @@ private struct LatencyChart: View {
         while age <= span + 0.001 {
             let x = plot.maxX - CGFloat(age / span) * plot.width
             ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: plot.minY)); $0.addLine(to: CGPoint(x: x, y: plot.maxY)) },
-                       with: grid, style: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
-            ctx.draw(Text(axisLabel(-age)).font(.caption2).foregroundStyle(palette.textWeak),
+                       with: shading, style: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+            ctx.draw(Text(axisLabel(-age)).font(.caption2).foregroundStyle(weak),
                      at: CGPoint(x: x, y: plot.maxY + 3), anchor: age == 0 ? .topTrailing : age >= span - 0.001 ? .topLeading : .top)
             age += ageStep
         }
