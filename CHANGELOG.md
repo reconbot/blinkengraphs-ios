@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.0](https://github.com/reconbot/blinkengraphs-ios/compare/v3.1.0...v3.2.0) (2026-11-23)
+
+
+### Features
+
+* History that crashes launch twice in a row is deleted ([#44](https://github.com/reconbot/blinkengraphs-ios/issues/44)) ([37ee200](https://github.com/reconbot/blinkengraphs-ios/commit/37ee200ad7e953bbba5fd189fed88fc3cdea69e4))
+
+
+### Bug Fixes
+
+* launch no longer crashes when no History is saved yet ([#42](https://github.com/reconbot/blinkengraphs-ios/issues/42)) ([789068f](https://github.com/reconbot/blinkengraphs-ios/commit/789068fe83a2a6599e47ae6fd20125ce5363e942))
+
 ## [3.1.0](https://github.com/reconbot/blinkengraphs-ios/compare/v3.0.0...v3.1.0) (2026-11-22)
 
 
