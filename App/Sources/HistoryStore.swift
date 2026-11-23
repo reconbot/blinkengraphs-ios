@@ -12,22 +12,31 @@ actor HistoryStore {
     private let directory: URL
     private var raw = HistoryCodec.Writer(), segment: Int?
     private var archives = HistoryCodec.Writer()
+    private let breaker: LoadBreaker
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         directory = support.appendingPathComponent("history", isDirectory: true)
+        breaker = LoadBreaker(directory: directory)
     }
 
     private var rawDirectory: URL { directory.appendingPathComponent("raw", isDirectory: true) }
     private var archiveFile: URL { directory.appendingPathComponent("archives.bin") }
 
-    /// Every record, Archives first, then Raw in the order it was written.
+    /// Every record, Archives first, then Raw in the order it was written. Until `finishLoad()`,
+    /// the launch counts as one that crashed while loading (ADR 0018).
     func load() -> [HistoryRecord] {
+        breaker.begin()
         var out = (try? Data(contentsOf: archiveFile)).map(HistoryCodec.decode) ?? []
         for (_, url) in segments() {
             if let data = try? Data(contentsOf: url) { out += HistoryCodec.decode(data) }
         }
         return out
+    }
+
+    /// Loading, replay and the launch's rewrite all finished without crashing.
+    func finishLoad() {
+        breaker.end()
     }
 
     func append(_ records: [HistoryRecord], now: Int) {

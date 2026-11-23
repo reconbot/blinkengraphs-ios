@@ -141,7 +141,7 @@ final class Monitor {
 
     /// Restores History from disk once, at launch: a kill leaves a Pause from the newest record
     /// to now. Steps that ended while the app was away are written, then the Archive file is
-    /// rewritten to what retention keeps.
+    /// rewritten to what retention keeps. History that crashes this twice in a row is set aside.
     private func load() async {
         guard !loaded else { return }
         let records = await store.load()
@@ -153,6 +153,7 @@ final class Monitor {
         _ = measurements.takeUnsaved()
         await store.compact(measurements.history.archiveRecords)
         await store.prune(rawCutoff: measurements.history.rawCutoff(now: Int(now)))
+        await store.finishLoad()
         loaded = true
     }
 
