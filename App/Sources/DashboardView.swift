@@ -283,7 +283,7 @@ private struct PublicAddressCard: View {
                     Text("No \(family) internet").foregroundStyle(palette.textWeak)
                 case .nat64?:
                     Text("IPv6-only network with NAT64").foregroundStyle(palette.text)
-                    if let a = r?.address { Text("shared IPv4 \(a)").font(.caption).foregroundStyle(palette.textWeak) }
+                    if let a = r?.address { CopyableAddress(address: a, prefix: "shared IPv4 ", font: .caption, color: palette.textWeak) }
                 case .agree?:
                     address(r?.address, asn: r?.asn)
                 case .single?:
@@ -291,20 +291,19 @@ private struct PublicAddressCard: View {
                     Text("one source: \(r?.source == .dns ? "DNS" : "HTTPS") only")
                         .font(.caption).foregroundStyle(palette.textWeak)
                 case .differ?:
-                    Text("DNS \(r?.dns ?? "")").foregroundStyle(palette.text)
-                    Text("HTTPS \(r?.https ?? "")").foregroundStyle(palette.text)
+                    if let a = r?.dns { CopyableAddress(address: a, prefix: "DNS ", color: palette.text) }
+                    if let a = r?.https { CopyableAddress(address: a, prefix: "HTTPS ", color: palette.text) }
                     Label("DNS and HTTPS leave by different paths", systemImage: "arrow.triangle.branch")
                         .font(.caption).foregroundStyle(palette.severity(.warn))
                 }
             }
             .font(.callout)
-            .textSelection(.enabled)
             Spacer(minLength: 0)
         }
     }
 
     @ViewBuilder private func address(_ a: String?, asn: String?) -> some View {
-        Text(a ?? "").foregroundStyle(palette.text).lineLimit(1).minimumScaleFactor(0.7)
+        if let a { CopyableAddress(address: a, color: palette.text) }
         if let asn { Text("AS\(asn)").font(.caption).foregroundStyle(palette.textWeak) }
     }
 }
@@ -369,3 +368,31 @@ func percent(_ loss: Double) -> String { "\(Int((loss * 100).rounded()))%" }
 #Preview("5G IPv6-only") { DashboardView(dashboard: Demo.cellular.dashboard()) }
 #Preview("VPN") { DashboardView(dashboard: Demo.vpn.dashboard()) }
 #Preview("Offline") { DashboardView(dashboard: Demo.offline.dashboard()) }
+
+/// An address a tap copies, confirmed in place for a moment.
+private struct CopyableAddress: View {
+    let address: String
+    var prefix = ""
+    var font: Font = .callout
+    let color: Color
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = address
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                copied = false
+            }
+        } label: {
+            Text(copied ? "Copied" : prefix + address)
+                .font(font).foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.7)
+                .contentTransition(.opacity)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.success, trigger: copied) { _, now in now }
+        .accessibilityLabel(prefix + address)
+        .accessibilityHint("Copies the address")
+    }
+}
