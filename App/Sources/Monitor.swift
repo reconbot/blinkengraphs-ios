@@ -67,7 +67,7 @@ final class Monitor {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.removeItem(at: support.appendingPathComponent("rollups", isDirectory: true))
         runners = [ICMPProbeRunner(), TCPProbeRunner(), DNSProbeRunner(queryName: defaults.dnsQueryName),
-                   SystemDNSProbeRunner(domain: defaults.dnsQueryName)]
+                   SystemDNSProbeRunner(domain: defaults.systemDNSDomain)]
     }
 
     func start() {

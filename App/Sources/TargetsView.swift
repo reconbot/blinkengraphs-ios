@@ -136,9 +136,9 @@ struct TargetEditor: View {
 
     /// What a DNS Probe sends (ProbeRunner.swift, Lookups.swift), so the toggle names its transport.
     private var dnsDetail: String {
-        let name = SpecResources.defaults.dnsQueryName
+        let d = SpecResources.defaults
         return dnsOnly
-            ? "System resolver, a random name under \(name)" : "UDP 53, asks for \(name)"
+            ? "System resolver, a random name under \(d.systemDNSDomain)" : "UDP 53, asks for \(d.dnsQueryName)"
     }
 
     var body: some View {

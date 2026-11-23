@@ -15,6 +15,14 @@ public struct Pause: Codable, Equatable, Sendable {
         return Pause(begin: begin, end: max(begin, launch + settle))
     }
 
+    /// The Pause a launch finds (spec rules/history.md, "Pauses"): after a kill, `afterKill`; with
+    /// nothing in Raw, from the launch, so the Verdict says measurements are resuming. Nil when
+    /// the newest record isn't before the launch.
+    public static func atLaunch(newestAt: Int?, launch: Double, settle: Double) -> Pause? {
+        guard let newestAt else { return Pause(begin: launch, end: launch + settle) }
+        return Double(newestAt) < launch ? afterKill(newestAt: newestAt, launch: launch, settle: settle) : nil
+    }
+
     /// Whether a Round from `start` to the end of its last Probe falls in any Pause, so it
     /// records nothing. One ending exactly as a Pause begins still records.
     public static func cuts(start: Double, end: Double, _ pauses: [Pause]) -> Bool {

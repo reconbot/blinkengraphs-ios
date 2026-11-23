@@ -121,12 +121,11 @@ public struct Measurements: Sendable {
         history.add(Pause(begin: begin, end: t + settle))
     }
 
-    /// On launch, the stretch after the newest record restored from disk was a kill.
+    /// On launch, the stretch after the newest record restored from disk was a kill; with
+    /// nothing restored, the Pause begins at the launch. `resume` ends it.
     public mutating func restore(_ restored: History, launch: Double) {
         history = restored
-        if let newest = restored.newestAt, Double(newest) < launch {
-            pauseBegan = Pause.afterKill(newestAt: newest, launch: launch, settle: 0).begin
-        }
+        pauseBegan = Pause.atLaunch(newestAt: restored.newestAt, launch: launch, settle: 0)?.begin
     }
 
     private var pauses: [Pause] {
