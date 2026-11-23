@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.3.0](https://github.com/reconbot/blinkengraphs-ios/compare/v3.2.0...v3.3.0) (2026-11-23)
+
+
+### Features
+
+* follow spec 6.2.0: platform-neutral Local Metrics, a Pause at first launch, system_dns_domain ([#50](https://github.com/reconbot/blinkengraphs-ios/issues/50)) ([1d76f83](https://github.com/reconbot/blinkengraphs-ios/commit/1d76f83b3dbed7efa9f61f26794712c133af2a1f))
+
+
+### Bug Fixes
+
+* Targets keep one row each, System DNS measures DNS only; tap a Public Address to copy it ([#46](https://github.com/reconbot/blinkengraphs-ios/issues/46)) ([55c915f](https://github.com/reconbot/blinkengraphs-ios/commit/55c915f1d93ff2ab31977710ec348fbf0b64c84a))
+* the latency chart draws off the main actor without trapping ([#49](https://github.com/reconbot/blinkengraphs-ios/issues/49)) ([a6bec5c](https://github.com/reconbot/blinkengraphs-ios/commit/a6bec5c032fa943b1fd770a7adebf3b84a83be1f))
+
 ## [3.2.0](https://github.com/reconbot/blinkengraphs-ios/compare/v3.1.0...v3.2.0) (2026-11-23)
 
 
