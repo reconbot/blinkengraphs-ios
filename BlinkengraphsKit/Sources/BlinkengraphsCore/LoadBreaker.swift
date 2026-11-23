@@ -2,9 +2,9 @@ import Foundation
 
 /// Stops a launch crash loop caused by History on disk (ADR 0018). `begin()` before loading,
 /// `end()` once loading and the first write are done. When `limit` loads in a row never
-/// reached `end()`, the next `begin()` moves the directory to `<name>.unreadable`, replacing
-/// any copy set aside before, so the app starts with empty History and the files stay for
-/// diagnosis. The count lives beside the directory, in `<name>.loading`, so it survives the move.
+/// reached `end()`, the next `begin()` deletes the directory, so the app starts with empty
+/// History; on iPhone it is fine to lose. The count lives beside the directory, in
+/// `<name>.loading`, so deleting the directory leaves it.
 public struct LoadBreaker: Sendable {
     private let directory: URL
     private let limit: Int
@@ -15,18 +15,14 @@ public struct LoadBreaker: Sendable {
     }
 
     private var counter: URL { directory.deletingLastPathComponent().appendingPathComponent(directory.lastPathComponent + ".loading") }
-    private var aside: URL { directory.deletingLastPathComponent().appendingPathComponent(directory.lastPathComponent + ".unreadable") }
 
-    /// Whether History was set aside. Records this load as unfinished until `end()`.
+    /// Whether History was deleted. Records this load as unfinished until `end()`.
     @discardableResult
     public func begin() -> Bool {
         let fm = FileManager.default
         let unfinished = (try? Data(contentsOf: counter)).flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let tripped = unfinished >= limit
-        if tripped {
-            try? fm.removeItem(at: aside)
-            try? fm.moveItem(at: directory, to: aside)
-        }
+        if tripped { try? fm.removeItem(at: directory) }
         try? fm.createDirectory(at: counter.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Written before loading starts: a trap mid-load leaves it for the next launch. No fsync
         // needed; a killed process keeps what the kernel has (ADR 0016).
