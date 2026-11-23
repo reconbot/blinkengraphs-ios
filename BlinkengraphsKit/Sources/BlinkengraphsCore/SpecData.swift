@@ -138,6 +138,8 @@ public struct Defaults: Decodable, Sendable {
     public var hopTrace: HopTraceDefaults
     public var maxTimeoutMs: Int
     public var dnsQueryName: String
+    /// The `system-dns` Probe resolves random names under it (spec rules/probe-group.md).
+    public var systemDNSDomain: String
     /// The Appearance until the user picks one in Settings.
     public var appearance: Appearance
     /// What a history graph point shows until the user picks one in Settings (rules/graph-aggregate.md).
@@ -150,7 +152,7 @@ public struct Defaults: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case probeGroup = "probe_group", history, hopTrace = "hop_trace"
-        case maxTimeoutMs = "max_timeout_ms", dnsQueryName = "dns_query_name", appearance
+        case maxTimeoutMs = "max_timeout_ms", dnsQueryName = "dns_query_name", systemDNSDomain = "system_dns_domain", appearance
         case graphAggregate = "graph_aggregate", readoutAggregate = "readout_aggregate"
         case captivePortalURL = "captive_portal_url", publicAddress = "public_address"
     }

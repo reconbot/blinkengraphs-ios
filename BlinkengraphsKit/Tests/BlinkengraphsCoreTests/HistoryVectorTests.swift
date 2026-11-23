@@ -251,3 +251,52 @@ private func graphRange(_ id: String) -> GraphRange {
     #expect(all.contains { $0.state == .value })
     #expect(Graph.summary(.sevenDays, now: now, source: src, aggregate: .max).value == 12)
 }
+
+private struct LaunchFile: Decodable {
+    struct Record: Decodable { var at: Int }
+    struct Case: Decodable { var name: String; var records: [Record]; var launch: Double; var settleS: Double; var expected: Pause?
+        enum CodingKeys: String, CodingKey { case name, records, launch, settleS = "settle_s", expected } }
+    var cases: [Case]
+}
+
+/// spec rules/history.md, "Pauses" and "Raw": the Pause a launch finds.
+@Test func launchVectors() throws {
+    let file = try JSONDecoder().decode(LaunchFile.self, from: Spec.file("vectors/history/launch.json"))
+    for c in file.cases {
+        #expect(Pause.atLaunch(newestAt: c.records.map(\.at).max(), launch: c.launch, settle: c.settleS) == c.expected, "\(c.name)")
+    }
+}
+
+private struct LinkSettleFile: Decodable {
+    struct Round: Decodable { var start: Double; var end: Double }
+    struct Case: Decodable { var name: String; var changes: [Double]; var rounds: [Round]; var settleS: Double; var expected: [Int]
+        enum CodingKeys: String, CodingKey { case name, changes, rounds, settleS = "settle_s", expected } }
+    var cases: [Case]
+}
+
+/// spec rules/history.md, "Link settle", as Monitor applies PathSettle to each Link besides the
+/// default route: a Round records when the Link is ready at its start and still ready at its end.
+@Test func linkSettleVectors() throws {
+    let file = try JSONDecoder().decode(LinkSettleFile.self, from: Spec.file("vectors/history/link-settle.json"))
+    let wifi = Link(interface: "en0", gateway: "192.168.1.1")
+    for c in file.cases {
+        var settle = PathSettle(quiet: c.settleS)
+        var pending = c.changes.sorted()
+        func report(through t: Double) {
+            while let next = pending.first, next <= t {
+                pending.removeFirst()
+                // Each change is a different Gateway, as a Link that appears or changes.
+                settle.report(.init(link: Link(interface: wifi.interface, gateway: "10.0.0.\(Int(next) % 250)"),
+                                    up: true, ipv4: true, ipv6: false), at: next)
+            }
+        }
+        var recorded: [Int] = []
+        for r in c.rounds {
+            report(through: r.start)
+            let readyAtStart = settle.ready(at: r.start)
+            report(through: r.end)
+            if readyAtStart && settle.ready(at: r.end) { recorded.append(Int(r.start.rounded(.down))) }
+        }
+        #expect(recorded == c.expected, "\(c.name)")
+    }
+}

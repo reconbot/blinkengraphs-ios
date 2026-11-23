@@ -52,8 +52,8 @@ public struct VerdictInput: Codable, Sendable {
 
     /// Denied Probes are absent.
     public var probes: [ProbeStat]
-    /// Metric values keyed by the spec's Windows names (`CpuTotal`, `NetUp`…). iOS fills only `NetUp`.
-    public var sample: [String: Double]?
+    /// The last Sample: the Metrics the Local rules read, and network rates. iOS fills only `netUp`.
+    public var sample: Sample?
     public var uploadPeakBps: Double
     /// Whether the OS reports any usable network path; absent in a vector means true.
     public var pathUp: Bool
@@ -66,7 +66,7 @@ public struct VerdictInput: Codable, Sendable {
     /// `history.recent_window_s`: how long after a Pause "Resuming measurements" can show.
     public var windowS: Double
 
-    public init(probes: [ProbeStat], sample: [String: Double]? = nil, uploadPeakBps: Double = 0,
+    public init(probes: [ProbeStat], sample: Sample? = nil, uploadPeakBps: Double = 0,
                 pathUp: Bool = true, viaVPN: Bool = false, captivePortal: Bool = false,
                 sincePauseS: Double? = nil, windowS: Double = 30) {
         self.probes = probes; self.sample = sample; self.uploadPeakBps = uploadPeakBps
@@ -82,7 +82,7 @@ public struct VerdictInput: Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         probes = try c.decode([ProbeStat].self, forKey: .probes)
-        sample = try c.decodeIfPresent([String: Double].self, forKey: .sample)
+        sample = try c.decodeIfPresent(Sample.self, forKey: .sample)
         uploadPeakBps = try c.decodeIfPresent(Double.self, forKey: .uploadPeakBps) ?? 0
         pathUp = try c.decodeIfPresent(Bool.self, forKey: .pathUp) ?? true
         viaVPN = try c.decodeIfPresent(Bool.self, forKey: .viaVPN) ?? false
@@ -215,7 +215,7 @@ public enum Verdict {
             let good = internet.first { $0.stat.loss < 0.05 && $0.probe.target != worst.probe.target } ?? best
             out.append(Finding(domain: .remote, severity: .warn, headline:
                 "\(worst.probe.target) losing \(pct(worst.stat.loss)), \(good.probe.target) fine: problem is on their side"))
-        } else if let up = input.sample?["NetUp"], up > 1_000_000, up >= 0.8 * input.uploadPeakBps,
+        } else if let up = input.sample?.netUp, up > 1_000_000, up >= 0.8 * input.uploadPeakBps,
                   let p = internet.first(where: { p in
                       guard let rtt = p.stat.rttMs, let base = p.stat.baselineMs else { return false }
                       return rtt > 3 * base && rtt - base > 30
@@ -240,20 +240,24 @@ public enum Verdict {
     }
 
     /// Windows-named Metrics; iOS never supplies them, but implementing them keeps every vector passing.
-    private static func localFindings(_ sample: [String: Double]?) -> [Finding] {
+    /// spec rules/verdict.md, "Local rules". iOS never supplies these Metrics; implementing them
+    /// keeps every vector passing.
+    private static func localFindings(_ sample: Sample?) -> [Finding] {
         guard let s = sample else { return [] }
         var out: [Finding] = []
-        if let cpu = s["CpuTotal"], cpu >= 90 {
+        if let cpu = s.cpuBusy, cpu >= 90 {
             out.append(Finding(domain: .localLoad, severity: .crit, headline: "CPU pinned at \(whole(cpu))%"))
         }
-        if let commit = s["MemCommit"], commit >= 90 {
-            out.append(Finding(domain: .localLoad, severity: .crit, headline: "Memory nearly exhausted: commit \(whole(commit))%"))
-        } else if let faults = s["MemHardFaults"], faults >= 1000 {
-            out.append(Finding(domain: .localLoad, severity: .warn, headline: "Paging heavily: \(whole(faults)) hard faults/s"))
+        if s.memPressure == .critical {
+            out.append(Finding(domain: .localLoad, severity: .crit, headline: "Memory nearly exhausted"))
+        } else if let pageIns = s.memPageIns, pageIns >= 4_096_000 {
+            out.append(Finding(domain: .localLoad, severity: .warn, headline: "Paging heavily: \(bytes(pageIns))/s from disk"))
         }
-        if let active = s["DiskActive"], let resp = s["DiskResponse"], active >= 90, resp >= 50 {
+        // The busiest saturated disk; the first listed on a tie.
+        let saturated = (s.disks ?? []).filter { $0.busy >= 90 && $0.responseMs >= 50 }
+        if let d = saturated.reduce(nil, { (a: Sample.Disk?, b) in a.map { b.busy > $0.busy ? b : $0 } ?? b }) {
             out.append(Finding(domain: .localLoad, severity: .warn,
-                               headline: "Disk saturated: \(whole(active))% busy, \(whole(resp)) ms response"))
+                               headline: "Disk saturated: \(whole(d.busy))% busy, \(whole(d.responseMs)) ms response"))
         }
         return out
     }
@@ -269,5 +273,38 @@ public enum Verdict {
         case 1e3...: "\(whole(b / 1e3)) kB"
         default: "\(whole(b)) B"
         }
+    }
+}
+
+/// The last Sample the Verdict reads (spec rules/verdict.md, "Input" and "Local rules"). Metrics
+/// mean the same on every platform (CONTEXT.md "Metric").
+public struct Sample: Codable, Equatable, Sendable {
+    public enum MemPressure: String, Codable, Sendable { case normal, warn, critical }
+
+    public struct Disk: Codable, Equatable, Sendable {
+        public var busy: Double
+        public var responseMs: Double
+        public init(busy: Double, responseMs: Double) { self.busy = busy; self.responseMs = responseMs }
+        enum CodingKeys: String, CodingKey { case busy = "DiskBusy", responseMs = "DiskResponse" }
+    }
+
+    public var cpuBusy: Double?
+    public var memPressure: MemPressure?
+    /// Bytes per second read from disk into memory.
+    public var memPageIns: Double?
+    public var disks: [Disk]?
+    /// Bytes per second.
+    public var netUp: Double?
+    public var netDown: Double?
+
+    public init(cpuBusy: Double? = nil, memPressure: MemPressure? = nil, memPageIns: Double? = nil,
+                disks: [Disk]? = nil, netUp: Double? = nil, netDown: Double? = nil) {
+        self.cpuBusy = cpuBusy; self.memPressure = memPressure; self.memPageIns = memPageIns
+        self.disks = disks; self.netUp = netUp; self.netDown = netDown
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case cpuBusy = "CpuBusy", memPressure = "MemPressure", memPageIns = "MemPageIns", disks = "Disks"
+        case netUp = "NetUp", netDown = "NetDown"
     }
 }

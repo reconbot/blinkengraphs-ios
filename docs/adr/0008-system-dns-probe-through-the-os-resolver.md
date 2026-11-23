@@ -1,6 +1,6 @@
 # 8. The system DNS Probe asks the OS resolver for a fresh random name
 
-**Status:** accepted
+**Status:** superseded by [spec ADR 0004](https://github.com/reconbot/blinkengraphs/blob/main/docs/adr/0004-system-dns-asks-a-random-name-under-microsoft-com.md), which makes this every platform's rule, under `system_dns_domain` (`microsoft.com`) instead of `dns_query_name`.
 
 The spec's `system-dns` Target measures the DNS server the device is configured with. iOS has no public API that returns that server's address, so this app can't send it a query directly the way it does 1.1.1.1.
 
