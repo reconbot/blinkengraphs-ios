@@ -100,7 +100,7 @@ struct ShotView: View {
         case .dashboard: DashboardView(dashboard: run.dashboard, anchorBottom: run.current?.bottom ?? false)
         case .settings: SettingsView()
         case .targets: NavigationStack { TargetsView() }
-        case .editor(let row): TargetEditor(row: row) { _ in }
+        case .editor(let row): TargetEditor(row: row, others: []) { _ in }
         }
     }
 }

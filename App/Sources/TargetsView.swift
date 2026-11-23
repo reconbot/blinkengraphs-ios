@@ -5,13 +5,17 @@ import SwiftUI
 enum ProbeGroupSetting {
     static let key = "probeGroup"
 
+    /// Normalized (spec rules/probe-group.md), so a group saved before the rule loads with one row per
+    /// Target and `system-dns` measuring DNS only.
     static func decode(_ json: String) -> Defaults.ProbeGroup {
-        json.isEmpty ? SpecResources.defaults.probeGroup
+        let group = json.isEmpty ? SpecResources.defaults.probeGroup
             : (try? JSONDecoder().decode(Defaults.ProbeGroup.self, from: Data(json.utf8))) ?? SpecResources.defaults.probeGroup
+        return group.normalized
     }
 
     static func encode(_ group: Defaults.ProbeGroup) -> String {
-        group == SpecResources.defaults.probeGroup ? ""
+        let group = group.normalized
+        return group == SpecResources.defaults.probeGroup ? ""
             : (try? JSONEncoder().encode(group)).map { String(decoding: $0, as: UTF8.self) } ?? ""
     }
 }
@@ -55,16 +59,24 @@ struct TargetsView: View {
         .navigationTitle("Targets")
         .toolbar { EditButton() }
         .sheet(item: Binding(get: { editing.map(Edit.init) }, set: { editing = $0?.index })) { edit in
-            TargetEditor(row: group.targets[edit.index]) { row in update { $0.targets[edit.index] = row } }
+            TargetEditor(row: group.targets[edit.index], others: others(than: edit.index)) { row in
+                update { $0.targets[edit.index] = row }
+            }
         }
         .sheet(isPresented: $adding) {
-            TargetEditor(row: Defaults.Target(target: "", icmp: true, dns: false, trace: false, tcp: nil, udp: nil)) { row in
+            TargetEditor(row: Defaults.Target(target: "", icmp: true, dns: false, trace: false, tcp: nil, udp: nil),
+                         others: others(than: nil)) { row in
                 update { $0.targets.append(row) }
             }
         }
     }
 
     private struct Edit: Identifiable { var index: Int; var id: Int { index } }
+
+    /// The group's other Targets, which the editor refuses (spec rules/probe-group.md).
+    private func others(than index: Int?) -> Set<String> {
+        Set(group.targets.indices.filter { $0 != index }.map { group.targets[$0].target })
+    }
 
     private func update(_ change: (inout Defaults.ProbeGroup) -> Void) {
         var g = group
@@ -97,27 +109,35 @@ private struct TargetRowLabel: View {
 
 struct TargetEditor: View {
     @State var row: Defaults.Target
+    /// Targets other rows already measure.
+    let others: Set<String>
     let save: (Defaults.Target) -> Void
     @State private var tcp = ""
     @State private var tcpOn = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
-    init(row: Defaults.Target, save: @escaping (Defaults.Target) -> Void) {
+    init(row: Defaults.Target, others: Set<String>, save: @escaping (Defaults.Target) -> Void) {
         _row = State(initialValue: row)
+        self.others = others
         _tcp = State(initialValue: row.tcp.map(String.init) ?? "")
         _tcpOn = State(initialValue: row.tcp != nil)
         self.save = save
     }
 
+    private var canonical: String { Defaults.Target.canonical(row.target) }
+    private var taken: Bool { others.contains(canonical) }
+    /// The system resolver has no address, so it measures DNS only (spec rules/probe-group.md).
+    private var dnsOnly: Bool { canonical == Probe.systemDNS }
+
     private var valid: Bool {
-        Defaults.Target.isValid(row.target) && (!tcpOn || UInt16(tcp).map { $0 > 0 } == true)
+        Defaults.Target.isValid(canonical) && !taken && (dnsOnly || !tcpOn || UInt16(tcp).map { $0 > 0 } == true)
     }
 
     /// What a DNS Probe sends (ProbeRunner.swift, Lookups.swift), so the toggle names its transport.
     private var dnsDetail: String {
         let name = SpecResources.defaults.dnsQueryName
-        return row.target.trimmingCharacters(in: .whitespaces).lowercased() == Probe.systemDNS
+        return dnsOnly
             ? "System resolver, a random name under \(name)" : "UDP 53, asks for \(name)"
     }
 
@@ -136,15 +156,17 @@ struct TargetEditor: View {
                         .foregroundStyle(palette.text)
                     }
                 } header: { Text("Target") } footer: {
-                    if !row.target.isEmpty && !Defaults.Target.isValid(row.target) {
+                    if taken {
+                        Text("\(TargetLayout.name(canonical)) is already measured.").foregroundStyle(palette.severity(.crit))
+                    } else if !row.target.isEmpty && !Defaults.Target.isValid(canonical) {
                         Text("Not an address or a host name.").foregroundStyle(palette.severity(.crit))
                     }
                 }
                 Section("Measure") {
-                    Toggle("ICMP", isOn: $row.icmp)
-                    Toggle("TCP", isOn: $tcpOn.animation())
+                    Toggle("ICMP", isOn: $row.icmp).disabled(dnsOnly)
+                    Toggle("TCP", isOn: $tcpOn.animation()).disabled(dnsOnly)
                         .onChange(of: tcpOn) { _, on in if on && tcp.isEmpty { tcp = "443" } }
-                    if tcpOn {
+                    if tcpOn && !dnsOnly {
                         LabeledContent("Port") {
                             TextField("443", text: $tcp)
                                 .keyboardType(.numberPad)
@@ -167,10 +189,11 @@ struct TargetEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         var r = row
-                        r.target = r.target.trimmingCharacters(in: .whitespaces).lowercased()
                         r.tcp = tcpOn ? Int(tcp) : nil
-                        if !r.traceable { r.trace = false }
-                        save(r)
+                        if !Defaults.Target(target: canonical, icmp: false, dns: false, trace: false, tcp: nil, udp: nil).traceable {
+                            r.trace = false
+                        }
+                        save(Defaults.Target.normalized([r])[0])
                         dismiss()
                     }
                     .disabled(!valid)
