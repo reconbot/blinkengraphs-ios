@@ -31,34 +31,6 @@ public struct Defaults: Decodable, Sendable {
 
         /// The Gateway and the system resolver have no route to trace.
         public var traceable: Bool { target != Probe.gateway && target != Probe.systemDNS }
-
-        /// Trimmed, lowercased, and an IP literal in canonical form: the text two rows compare by.
-        public static func canonical(_ text: String) -> String {
-            let t = text.trimmingCharacters(in: .whitespaces).lowercased()
-            return PublicAddress.canonical(t) ?? t
-        }
-
-        /// spec rules/probe-group.md, "Normalizing": one row per Target, in the first row's place,
-        /// and `system-dns` measuring DNS only.
-        public static func normalized(_ rows: [Target]) -> [Target] {
-            var out: [Target] = []
-            for var row in rows {
-                row.target = canonical(row.target)
-                if row.target == Probe.systemDNS {
-                    row.icmp = false; row.trace = false; row.tcp = nil; row.udp = nil
-                }
-                guard let i = out.firstIndex(where: { $0.target == row.target }) else {
-                    out.append(row)
-                    continue
-                }
-                out[i].icmp = out[i].icmp || row.icmp
-                out[i].dns = out[i].dns || row.dns
-                out[i].trace = out[i].trace || row.trace
-                out[i].tcp = out[i].tcp ?? row.tcp
-                out[i].udp = out[i].udp ?? row.udp
-            }
-            return out
-        }
     }
 
     public struct ProbeGroup: Codable, Equatable, Sendable {
@@ -74,12 +46,6 @@ public struct Defaults: Decodable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case name, targets, latencyMs = "latency_ms", dnsMs = "dns_ms", traceMs = "trace_ms"
-        }
-
-        public var normalized: ProbeGroup {
-            var g = self
-            g.targets = Target.normalized(targets)
-            return g
         }
 
         /// Latency and DNS Probes this group runs, in table order.
@@ -138,8 +104,6 @@ public struct Defaults: Decodable, Sendable {
     public var hopTrace: HopTraceDefaults
     public var maxTimeoutMs: Int
     public var dnsQueryName: String
-    /// The `system-dns` Probe resolves random names under it (spec rules/probe-group.md).
-    public var systemDNSDomain: String
     /// The Appearance until the user picks one in Settings.
     public var appearance: Appearance
     /// What a history graph point shows until the user picks one in Settings (rules/graph-aggregate.md).
@@ -152,7 +116,7 @@ public struct Defaults: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case probeGroup = "probe_group", history, hopTrace = "hop_trace"
-        case maxTimeoutMs = "max_timeout_ms", dnsQueryName = "dns_query_name", systemDNSDomain = "system_dns_domain", appearance
+        case maxTimeoutMs = "max_timeout_ms", dnsQueryName = "dns_query_name", appearance
         case graphAggregate = "graph_aggregate", readoutAggregate = "readout_aggregate"
         case captivePortalURL = "captive_portal_url", publicAddress = "public_address"
     }
